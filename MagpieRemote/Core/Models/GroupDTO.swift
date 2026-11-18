@@ -13,7 +13,8 @@ struct GroupDTO: Codable, Sendable, Identifiable, Hashable {
     var pick: String?
     var unlisted: Bool?
     var sink: Bool?
-    var off: Bool?
+    var off: [String]?
+    var disabled: Bool?
     var keys: [String]?
     var accounts: [String]?
     var auto: Bool?

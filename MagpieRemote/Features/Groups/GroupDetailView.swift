@@ -126,7 +126,7 @@ struct GroupDetailView: View {
                         if group.unlisted == true {
                             MagpieStatusChip(text: String(localized: "仅路由组"), color: MagpieTheme.cyan)
                         }
-                        if group.off == true {
+                        if group.disabled == true {
                             MagpieStatusChip(text: String(localized: "已停用"), color: MagpieTheme.amber)
                         }
                         if group.ready == true {
@@ -268,7 +268,12 @@ struct GroupDetailView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(info.enumerated()), id: \.element.id) { index, member in
-                        memberRow(member, index: index, isPicked: group.picked == member.id)
+                        memberRow(
+                            member,
+                            index: index,
+                            isPicked: group.picked == member.id,
+                            isOff: group.off?.contains(member.id) == true
+                        )
                         if index < info.count - 1 {
                             Divider().background(MagpieTheme.borderSubtle).padding(.leading, 58)
                         }
@@ -279,7 +284,7 @@ struct GroupDetailView: View {
         }
     }
 
-    private func memberRow(_ member: GroupMemberDTO, index: Int, isPicked: Bool) -> some View {
+    private func memberRow(_ member: GroupMemberDTO, index: Int, isPicked: Bool, isOff: Bool) -> some View {
         HStack(spacing: 11) {
             Text("\(index + 1)")
                 .font(.system(size: 10, weight: .bold, design: .rounded))
@@ -305,6 +310,9 @@ struct GroupDetailView: View {
 
                     if member.group == true {
                         MagpieStatusChip(text: String(localized: "嵌套组"), color: MagpieTheme.purple)
+                    }
+                    if isOff {
+                        MagpieStatusChip(text: String(localized: "已停用"), color: MagpieTheme.amber)
                     }
                     if member.providerOff == true {
                         MagpieStatusChip(text: String(localized: "提供方已停用"), color: MagpieTheme.amber)
@@ -381,7 +389,7 @@ struct GroupDetailView: View {
     private func footerActions(_ group: GroupDTO) -> some View {
         VStack(spacing: 10) {
             Toggle(isOn: Binding(
-                get: { !(group.off ?? false) },
+                get: { !(group.disabled ?? false) },
                 set: { on in
                     guard let client = app.client else { return }
                     Task { _ = await activeVM.switchGroup(client: client, id: group.id, on: on) }
