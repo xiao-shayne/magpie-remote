@@ -70,6 +70,15 @@ final class ModelDecodingTests: XCTestCase {
               "routing": "smart",
               "ready": true,
               "members": ["provider1/modelA", "provider2/modelB"]
+            },
+            {
+              "id": "g2",
+              "ref": "group/g2",
+              "name": "Custom",
+              "members": ["provider1/modelA", "provider2/modelB"],
+              "unlists": true,
+              "off": ["provider1/modelA"],
+              "disabled": true
             }
           ],
           "found": true
@@ -77,10 +86,34 @@ final class ModelDecodingTests: XCTestCase {
         """.data(using: .utf8)!
 
         let res = try JSONDecoder().decode(GroupsResponseDTO.self, from: json)
-        XCTAssertEqual(res.groups.count, 1)
+        XCTAssertEqual(res.groups.count, 2)
         XCTAssertEqual(res.groups[0].name, "DeepSeek V4")
         XCTAssertTrue(res.groups[0].isAuto)
         XCTAssertEqual(res.groups[0].members?.count, 2)
+        XCTAssertEqual(res.groups[1].unlists, true)
+        XCTAssertEqual(res.groups[1].off, ["provider1/modelA"])
+        XCTAssertEqual(res.groups[1].disabled, true)
+    }
+
+    func testGroupSaveRequestEncodesUpstreamKeys() throws {
+        let request = GroupSaveRequest(
+            id: "g2",
+            name: "Custom",
+            members: ["provider1/modelA"],
+            routing: "smart",
+            affinity: "",
+            unlists: true,
+            sink: false,
+            keys: nil,
+            accounts: nil,
+            classifier: nil,
+            rules: nil,
+            from: nil
+        )
+        let data = try JSONEncoder().encode(request)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(object["unlists"] as? Bool, true)
+        XCTAssertNil(object["unlisted"])
     }
 
     func testDecodeUsageAndQuotas() throws {

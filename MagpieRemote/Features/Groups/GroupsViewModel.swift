@@ -58,7 +58,7 @@ final class GroupsViewModel {
             members: draft.members,
             routing: draft.routing,
             affinity: draft.affinity,
-            unlisted: draft.unlisted,
+            unlists: draft.unlists,
             sink: draft.sink,
             keys: draft.keys,
             accounts: draft.accounts,

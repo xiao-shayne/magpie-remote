@@ -11,7 +11,7 @@ struct GroupDTO: Codable, Sendable, Identifiable, Hashable {
     var classifier: String?
     var rules: JSONValue?
     var pick: String?
-    var unlisted: Bool?
+    var unlists: Bool?
     var sink: Bool?
     var off: [String]?
     var disabled: Bool?
@@ -47,7 +47,7 @@ struct GroupDTO: Codable, Sendable, Identifiable, Hashable {
             members: members ?? [],
             routing: routing ?? "smart",
             affinity: affinity ?? "",
-            unlisted: unlisted ?? false,
+            unlists: unlists ?? false,
             sink: sink ?? false,
             keys: keys,
             accounts: accounts,
@@ -64,7 +64,7 @@ struct GroupDraft: Sendable, Equatable {
     var members: [String]
     var routing: String
     var affinity: String
-    var unlisted: Bool
+    var unlists: Bool
     var sink: Bool
     var keys: [String]? = nil
     var accounts: [String]? = nil
@@ -182,7 +182,7 @@ struct GroupTemplateBodyDTO: Codable, Sendable, Hashable {
     var affinity: String?
     var classifier: String?
     var rules: JSONValue?
-    var unlisted: Bool?
+    var unlists: Bool?
 }
 
 /// 每个组的共同默认值。
@@ -228,7 +228,7 @@ struct GroupImportedGroupDTO: Codable, Sendable, Hashable {
     var members: [String]?
     var routing: String?
     var affinity: String?
-    var unlisted: Bool?
+    var unlists: Bool?
 }
 
 /// `POST /api/groups/save` 的请求体：官方 provider.Group 的扁平结构 + from。
@@ -238,7 +238,7 @@ struct GroupSaveRequest: Encodable, Sendable {
     var members: [String]
     var routing: String
     var affinity: String
-    var unlisted: Bool
+    var unlists: Bool
     var sink: Bool
     var keys: [String]?
     var accounts: [String]?
@@ -253,7 +253,7 @@ struct GroupSaveRequest: Encodable, Sendable {
         try c.encode(members, forKey: .members)
         try c.encode(routing, forKey: .routing)
         try c.encode(affinity, forKey: .affinity)
-        try c.encode(unlisted, forKey: .unlisted)
+        try c.encode(unlists, forKey: .unlists)
         try c.encode(sink, forKey: .sink)
         try c.encodeIfPresent(keys, forKey: .keys)
         try c.encodeIfPresent(accounts, forKey: .accounts)
@@ -263,7 +263,7 @@ struct GroupSaveRequest: Encodable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, members, routing, affinity, unlisted, sink, keys, accounts
+        case id, name, members, routing, affinity, unlists, sink, keys, accounts
         case classifier, rules, from
     }
 }

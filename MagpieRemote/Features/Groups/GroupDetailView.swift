@@ -123,7 +123,7 @@ struct GroupDetailView: View {
                         if group.isAuto {
                             MagpieStatusChip(text: "AUTO", color: MagpieTheme.accent)
                         }
-                        if group.unlisted == true {
+                        if group.unlists == true {
                             MagpieStatusChip(text: String(localized: "仅路由组"), color: MagpieTheme.cyan)
                         }
                         if group.disabled == true {

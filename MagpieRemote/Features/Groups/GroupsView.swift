@@ -789,7 +789,7 @@ private struct GroupCard: View {
                     strategyBadge(routing: routing, title: group.routingDisplayName)
                 }
 
-                if group.unlisted == true {
+                if group.unlists == true {
                     MagpieStatusChip(text: String(localized: "仅路由组"), color: MagpieTheme.cyan)
                 }
 

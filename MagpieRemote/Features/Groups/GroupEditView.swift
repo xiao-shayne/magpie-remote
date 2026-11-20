@@ -442,7 +442,7 @@ struct GroupEditView: View {
         idDraft = editing.isAuto ? slugifiedCopyID(editing) : editing.id
         routingDraft = editing.routing ?? "smart"
         affinityDraft = editing.affinity ?? ""
-        unlistedDraft = editing.unlisted ?? false
+        unlistedDraft = editing.unlists ?? false
         sinkDraft = editing.sink ?? false
         members = editing.members ?? []
         classifierDraft = editing.classifier ?? ""
@@ -492,7 +492,7 @@ struct GroupEditView: View {
             members: members,
             routing: routingDraft,
             affinity: affinityDraft,
-            unlisted: unlistedDraft,
+            unlists: unlistedDraft,
             sink: sinkDraft,
             keys: editing?.keys,
             accounts: editing?.accounts,
