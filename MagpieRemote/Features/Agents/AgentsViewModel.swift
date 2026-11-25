@@ -35,6 +35,35 @@ final class AgentsViewModel {
         }
     }
 
+    /// 将被隐藏/未选入列表的路由组重新放回该 Agent 的模型列表（`POST /api/agent-models/{id}`），再设为当前值。
+    func showAndPick(
+        client: MagpieAPIClient,
+        app: AppModel,
+        agentID: String,
+        fieldKey: String,
+        ref: String,
+        value: String
+    ) async -> Bool {
+        isSaving = true
+        saveError = nil
+        defer { isSaving = false }
+        do {
+            if !ref.isEmpty {
+                struct ShowBody: Encodable { let Show: String }
+                _ = try await client.sendData(
+                    try Endpoint.post("/api/agent-models/\(agentID)", body: ShowBody(Show: ref))
+                )
+            }
+            let body = SetRequest(agent: agentID, field: fieldKey, value: value)
+            let newState = try await client.send(.post("/api/set", body: body), as: StateDTO.self)
+            app.apply(newState)
+            return true
+        } catch {
+            saveError = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            return false
+        }
+    }
+
     // MARK: - 面板
     func loadPanels(client: MagpieAPIClient) async {
         isLoadingPanels = true

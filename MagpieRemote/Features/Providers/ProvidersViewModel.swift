@@ -8,6 +8,8 @@ final class ProvidersViewModel {
     var presets: [PresetDTO] = []
     /// 插件提供的订阅（Add 面板的 plugin subs）。
     var plugins: [PluginSubDTO] = []
+    /// 已下架但仍在启用的旧插件迁移提示。
+    var withdrawn: [WithdrawnPluginDTO] = []
     var isLoading = false
     var errorMessage: String?
     var testResult: String?
@@ -21,6 +23,7 @@ final class ProvidersViewModel {
             self.providers = res.providers
             self.presets = res.presets ?? []
             self.plugins = res.plugins ?? []
+            self.withdrawn = res.withdrawn ?? []
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
@@ -96,6 +99,44 @@ final class ProvidersViewModel {
             )
         } catch {
             // 停止失败不覆盖测试结果
+        }
+    }
+
+    /// 中转站质量实测（官方 `POST /api/relay-check`）：验证准确性、工具调用与输出速度。
+    func checkRelay(client: MagpieAPIClient, provider: String, model: String) async -> RelayCheckResultDTO? {
+        isOperating = true
+        errorMessage = nil
+        defer { isOperating = false }
+        do {
+            struct Body: Encodable { let provider: String; let model: String }
+            let result: RelayCheckResultDTO = try await client.send(
+                .post("/api/relay-check", body: Body(provider: provider, model: model)),
+                as: RelayCheckResultDTO.self,
+                timeout: 180
+            )
+            return result
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            return nil
+        }
+    }
+
+    /// 重新检测 Claude 订阅账号的出口地区（官方 `POST /api/egress/check`）。
+    func checkEgress(client: MagpieAPIClient) async -> EgressResultDTO? {
+        isOperating = true
+        errorMessage = nil
+        defer { isOperating = false }
+        do {
+            let result: EgressResultDTO = try await client.send(
+                .post("/api/egress/check"),
+                as: EgressResultDTO.self,
+                timeout: 30
+            )
+            await load(client: client)
+            return result
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            return nil
         }
     }
 

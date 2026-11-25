@@ -18,6 +18,8 @@ struct GatewayKeyDTO: Codable, Sendable, Identifiable, Hashable {
     var maxConcurrency: Int?
     var serviceTier: String?
     var redact: String?
+    var memory: Bool?
+    var routing: String?
     var expires: String?
     var limit: GatewayLimitDTO?
     var moreLimits: [GatewayLimitDTO]?
@@ -70,9 +72,11 @@ struct GatewayLimitDTO: Codable, Sendable, Hashable, Identifiable {
     var cacheReads: Bool?
     var since: String?
     var models: [String]?
+    var account: String?
+    var accountWindow: String?
 
     var id: String {
-        "\(period)-\(days ?? 0)-\(hours ?? 0)-\(tokens ?? 0)-\(cost ?? 0)-\((models ?? []).joined(separator: "|"))"
+        "\(period)-\(days ?? 0)-\(hours ?? 0)-\(account ?? "")-\(accountWindow ?? "")-\(tokens ?? 0)-\(cost ?? 0)-\((models ?? []).joined(separator: "|"))"
     }
 
     var periodName: String {
@@ -82,6 +86,11 @@ struct GatewayLimitDTO: Codable, Sendable, Hashable, Identifiable {
         case "month": return String(localized: "每月")
         case "days": return String(localized: "每 \(days ?? 1) 天")
         case "hours": return String(localized: "每 \(hours ?? 1) 小时")
+        case "account":
+            let acc = account ?? ""
+            let win = accountWindow ?? ""
+            if !acc.isEmpty, !win.isEmpty { return "\(acc) · \(win)" }
+            return String(localized: "跟随账号窗口")
         case "total": return String(localized: "累计")
         default: return period
         }
@@ -120,6 +129,8 @@ struct GatewayLimitUsageDTO: Codable, Sendable, Hashable {
     var costLimit: Double?
     var cacheReads: Bool?
     var models: [String]?
+    var account: String?
+    var accountWindow: String?
     var tokensLeft: Int64?
     var costLeft: Double?
     var spent: Bool?
@@ -133,6 +144,11 @@ struct GatewayLimitUsageDTO: Codable, Sendable, Hashable {
         case "month": return String(localized: "每月")
         case "days": return String(localized: "每 \(days ?? 1) 天")
         case "hours": return String(localized: "每 \(hours ?? 1) 小时")
+        case "account":
+            if let account, !account.isEmpty, let accountWindow, !accountWindow.isEmpty {
+                return "\(account) · \(accountWindow)"
+            }
+            return String(localized: "跟随账号窗口")
         case "total": return String(localized: "累计")
         default: return period
         }
@@ -312,9 +328,40 @@ struct GatewayModelDTO: Codable, Sendable, Identifiable, Hashable {
     var provider: String?
     var providerName: String?
     var group: Bool?
+    var decides: Bool?
     var account: Bool?
     var key: Bool?
     var plan: String?
 
     var displayName: String { (name?.isEmpty == false ? name! : id) }
+}
+
+/// `GET /api/caller-keys/account-windows`：订阅账号的配额窗口，供 Key 限额跟随重置。
+struct GatewayAccountWindowsResponseDTO: Codable, Sendable {
+    var windows: [GatewayAccountWindowDTO]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.windows = (try? c.decode([GatewayAccountWindowDTO].self, forKey: .windows)) ?? []
+    }
+
+    enum CodingKeys: String, CodingKey { case windows }
+}
+
+struct GatewayAccountWindowDTO: Codable, Sendable, Identifiable, Hashable {
+    var account: String
+    var window: String
+    var provider: String?
+    var user: String?
+    var alias: String?
+    var start: String?
+    var reset: String?
+
+    var id: String { "\(account)|\(window)" }
+
+    var displayLabel: String {
+        let who = (alias?.isEmpty == false ? alias! : (user?.isEmpty == false ? user! : account))
+        let head = (provider?.isEmpty == false) ? "\(provider!) · \(who)" : who
+        return "\(head) (\(window))"
+    }
 }

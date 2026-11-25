@@ -67,6 +67,7 @@ struct QuotaItemDTO: Codable, Sendable, Identifiable, Hashable {
     var user: String?
     var icon: String?
     var balance: String?
+    var readError: String?
     var windows: [QuotaWindowDTO]?
 
     /// 同一 Provider 可能有多个账号，账号名必须参与标识，否则 ForEach 会收到重复 ID。
@@ -94,6 +95,43 @@ struct QuotaItemDTO: Codable, Sendable, Identifiable, Hashable {
 
 // MARK: - Overview 分组
 /// `/api/usage` 的 agents / models / accounts / callerKeys 行。
+/// upstream `usage.Rates`：2% 步长对数直方图，用于计算中位输出速度（`Totals.Speed`）。
+struct UsageRatesDTO: Codable, Sendable, Hashable {
+    var s: [String: Int]?
+    var f: [String: Int]?
+
+    /// 对齐 upstream `speedHist.median()`（`histStep = 1.02`, `histZero = 400`）。
+    static func median(of hist: [String: Int]?) -> Double? {
+        guard let hist, !hist.isEmpty else { return nil }
+        let bins = hist.compactMap { (k, v) -> (bin: Int, count: Int)? in
+            guard let b = Int(k), v > 0 else { return nil }
+            return (b, v)
+        }.sorted { $0.bin < $1.bin }
+        let total = bins.reduce(0) { $0 + $1.count }
+        guard total > 0 else { return nil }
+        let lo = (total - 1) / 2
+        let hi = total / 2
+        let histLog = log(1.02)
+        var seen = 0
+        var sum = 0.0
+        var got = 0
+        for item in bins {
+            let next = seen + item.count
+            let val = exp((Double(item.bin) - 400.0 + 0.5) * histLog)
+            if lo >= seen && lo < next {
+                sum += val
+                got += 1
+            }
+            if hi >= seen && hi < next {
+                sum += val
+                got += 1
+            }
+            seen = next
+        }
+        return got > 0 ? sum / Double(got) : nil
+    }
+}
+
 struct UsageGroupDTO: Codable, Sendable, Identifiable {
     var rawID: String?
     var name: String?
@@ -111,6 +149,12 @@ struct UsageGroupDTO: Codable, Sendable, Identifiable {
     var cost: Double?
     var unpriced: Int?
     var tokens: Int?
+    var tps: Double?
+    var decodeMs: Int64?
+    var decodeOut: Int?
+    var decodeN: Int?
+    var rates: UsageRatesDTO?
+    var last: String?
 
     var id: String {
         [rawID, name, model, account, callerKeyId, provider]
@@ -120,6 +164,21 @@ struct UsageGroupDTO: Codable, Sendable, Identifiable {
 
     var totalTokens: Int {
         tokens ?? ((input ?? 0) + (output ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0))
+    }
+
+    /// 对齐 upstream `usage.Totals.Speed()`：优先使用单条精确值或 2% 直方图中位速度。
+    var effectiveTPS: Double? {
+        if let tps, tps > 0 { return tps }
+        if decodeN == 1, let ms = decodeMs, ms > 0, let out = decodeOut, out > 0 {
+            return Double(out) / (Double(ms) / 1000.0)
+        }
+        if let med = UsageRatesDTO.median(of: rates?.s), med > 0 {
+            return med
+        }
+        if let ms = decodeMs, ms > 0, let out = decodeOut, out > 0 {
+            return Double(out) / (Double(ms) / 1000.0)
+        }
+        return nil
     }
 
     var displayName: String {
@@ -140,11 +199,60 @@ struct UsageGroupDTO: Codable, Sendable, Identifiable {
         case calls, input, output
         case cacheRead = "cache_read"
         case cacheWrite = "cache_write"
-        case cost, unpriced, tokens
+        case cost, unpriced, tokens, tps, rates, last
+        case decodeMs = "decode_ms"
+        case decodeOut = "decode_out"
+        case decodeN = "decode_n"
     }
 }
 
 // MARK: - Requests 账本
+struct UsageModelSpeedDTO: Codable, Sendable, Identifiable, Hashable {
+    var model: String
+    var name: String?
+    var requests: Int?
+    var tps: Double?
+    var tpsN: Int?
+    var ttftMs: Int64?
+
+    var id: String { model }
+    var displayName: String { (name?.isEmpty == false) ? name! : model }
+
+    enum CodingKeys: String, CodingKey {
+        case model, name, requests, tps
+        case tpsN = "tps_n"
+        case ttftMs = "ttft_ms"
+    }
+}
+
+struct UsageProviderSpeedDTO: Codable, Sendable, Identifiable, Hashable {
+    var model: String
+    var name: String?
+    var provider: String
+    var providerName: String?
+    var icon: String?
+    var requests: Int?
+    var tps: Double?
+    var tpsN: Int?
+    var ttftMs: Int64?
+    var tries: Int?
+    var failed: Int?
+    var swapped: Int?
+
+    var id: String { "\(model)|\(provider)" }
+    var displayName: String { (name?.isEmpty == false) ? name! : model }
+    var displayProvider: String { (providerName?.isEmpty == false) ? providerName! : provider }
+
+    enum CodingKeys: String, CodingKey {
+        case model, name, provider
+        case providerName = "provider_name"
+        case icon, requests, tps
+        case tpsN = "tps_n"
+        case ttftMs = "ttft_ms"
+        case tries, failed, swapped
+    }
+}
+
 struct UsageLedgerDTO: Codable, Sendable {
     var rows: [UsageLedgerRowDTO]?
     var total: Int?
@@ -163,6 +271,8 @@ struct UsageLedgerDTO: Codable, Sendable {
     var providers: [UsageNamedDTO]?
     var accounts: [UsageAccountDTO]?
     var callerKeys: [UsageGroupDTO]?
+    var speeds: [UsageModelSpeedDTO]?
+    var providerSpeeds: [UsageProviderSpeedDTO]?
 
     enum CodingKeys: String, CodingKey {
         case rows, total, offset, bucket, day, period
@@ -170,6 +280,8 @@ struct UsageLedgerDTO: Codable, Sendable {
         case cacheRead = "cache_read"
         case cacheWrite = "cache_write"
         case cost, unpriced, agents, providers, accounts, callerKeys
+        case speeds
+        case providerSpeeds = "provider_speeds"
     }
 }
 
@@ -183,6 +295,8 @@ struct UsageLedgerRowDTO: Codable, Sendable, Identifiable {
     var providerName: String?
     var model: String?
     var requested: String?
+    /// 实际发往上游厂商的模型 ID（upstream `usage.Record.Wire`）。
+    var wire: String?
     var session: String?
     var input: Int?
     var output: Int?
@@ -193,6 +307,7 @@ struct UsageLedgerRowDTO: Codable, Sendable, Identifiable {
     var status: Int?
     var error: String?
     var millis: Int64?
+    var ttft: Int64?
     var source: String?
     var callerKeyId: String?
     var callerKeyLabel: String?
@@ -226,6 +341,7 @@ struct UsageLedgerRowDTO: Codable, Sendable, Identifiable {
         case time = "t"
         case agent, agentName, icon, provider, providerName, model
         case requested = "req"
+        case wire
         case session
         case input = "in"
         case output = "out"
@@ -234,9 +350,32 @@ struct UsageLedgerRowDTO: Codable, Sendable, Identifiable {
         case cost, priced, status
         case error = "err"
         case millis = "ms"
+        case ttft = "ttft_ms"
         case source
         case callerKeyId, callerKeyLabel, access, canceled
     }
+}
+
+/// `POST /api/warm-all` 的返回：每个账号的一键预热结果。
+struct WarmAllResponseDTO: Codable, Sendable {
+    var results: [WarmAllResultDTO]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.results = (try? c.decode([WarmAllResultDTO].self, forKey: .results)) ?? []
+    }
+
+    enum CodingKeys: String, CodingKey { case results }
+}
+
+struct WarmAllResultDTO: Codable, Sendable, Identifiable, Hashable {
+    var user: String
+    var skip: String?
+    var error: String?
+
+    var id: String { user }
+
+    var isWarmed: Bool { (skip ?? "").isEmpty && (error ?? "").isEmpty }
 }
 
 struct UsageNamedDTO: Codable, Sendable, Identifiable {

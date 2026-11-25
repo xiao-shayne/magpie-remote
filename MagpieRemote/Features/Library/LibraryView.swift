@@ -372,6 +372,38 @@ struct LibraryView: View {
     // MARK: - 技能
     private var skillsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            // Skill Router 顶栏（对齐 upstream dea4c2a5）
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        .fill(MagpieTheme.purple.opacity(0.14))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(MagpieTheme.purple)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(String(localized: "Skill Router"))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(MagpieTheme.textPrimary)
+                    Text(String(localized: "按需向 Agent 路由技能，节省上下文"))
+                        .font(.caption2)
+                        .foregroundStyle(MagpieTheme.textMuted)
+                }
+                Spacer(minLength: 8)
+                Toggle("", isOn: Binding(
+                    get: { library?.skillRouter ?? false },
+                    set: { on in
+                        guard let client = app.client else { return }
+                        Task { await viewModel.setSkillRouter(client: client, on: on) }
+                    }
+                ))
+                .labelsHidden()
+                .tint(MagpieTheme.green)
+                .disabled(viewModel.isWorking)
+            }
+            .magpieCard(padding: 12)
+
             MagpieSectionLabel(
                 title: String(localized: "技能"),
                 detail: String(localized: "点击查看并分配 Agent")
@@ -499,6 +531,94 @@ struct LibraryView: View {
     // MARK: - MCP
     private var serversSection: some View {
         VStack(alignment: .leading, spacing: 10) {
+            // MCP Router 顶栏（对齐 upstream 32dc676e + servers/hub-tools + servers/hub-code）
+            VStack(spacing: 10) {
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(MagpieTheme.cyan.opacity(0.14))
+                            .frame(width: 34, height: 34)
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(MagpieTheme.cyan)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(localized: "MCP Router"))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(MagpieTheme.textPrimary)
+                        Text(String(localized: "统一入口路由所有 MCP 服务，支持按需加载与 run_code"))
+                            .font(.caption2)
+                            .foregroundStyle(MagpieTheme.textMuted)
+                    }
+                    Spacer(minLength: 8)
+                    Toggle("", isOn: Binding(
+                        get: { library?.mcpHub ?? false },
+                        set: { on in
+                            guard let client = app.client else { return }
+                            Task { await viewModel.setMCPHub(client: client, on: on) }
+                        }
+                    ))
+                    .labelsHidden()
+                    .tint(MagpieTheme.green)
+                    .disabled(viewModel.isWorking)
+                }
+
+                if library?.mcpHub == true {
+                    Divider().background(MagpieTheme.borderSubtle)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(String(localized: "按需暴露工具"))
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(MagpieTheme.textPrimary)
+                            Text(String(localized: "开启时只在需要时列出工具，减少上下文占用"))
+                                .font(.caption2)
+                                .foregroundStyle(MagpieTheme.textMuted)
+                        }
+                        Spacer(minLength: 8)
+                        Toggle("", isOn: Binding(
+                            get: { !(app.state?.settings?.routerAllTools ?? false) },
+                            set: { onDemand in
+                                guard let client = app.client else { return }
+                                Task {
+                                    await viewModel.setHubAllTools(client: client, allTools: !onDemand)
+                                    await app.refresh()
+                                }
+                            }
+                        ))
+                        .labelsHidden()
+                        .tint(MagpieTheme.green)
+                        .disabled(viewModel.isWorking)
+                    }
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(String(localized: "代码模式 (run_code)"))
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(MagpieTheme.textPrimary)
+                            Text(String(localized: "允许 Agent 用脚本组合调用 MCP 与技能"))
+                                .font(.caption2)
+                                .foregroundStyle(MagpieTheme.textMuted)
+                        }
+                        Spacer(minLength: 8)
+                        Toggle("", isOn: Binding(
+                            get: { !(app.state?.settings?.routerNoCode ?? false) },
+                            set: { on in
+                                guard let client = app.client else { return }
+                                Task {
+                                    await viewModel.setHubCode(client: client, on: on)
+                                    await app.refresh()
+                                }
+                            }
+                        ))
+                        .labelsHidden()
+                        .tint(MagpieTheme.green)
+                        .disabled(viewModel.isWorking)
+                    }
+                }
+            }
+            .magpieCard(padding: 12)
+
             HStack {
                 MagpieSectionLabel(
                     title: String(localized: "MCP 服务"),

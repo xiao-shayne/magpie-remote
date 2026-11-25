@@ -929,6 +929,29 @@ struct RoutingRouteDetailSheet: View {
                                         .padding(.vertical, 1.5)
                                         .background(Capsule().fill(MagpieTheme.greenSoft))
                                 }
+                                if cand.ultra == true {
+                                    Text("ULTRA")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(MagpieTheme.purple)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1.5)
+                                        .background(Capsule().fill(MagpieTheme.purple.opacity(0.14)))
+                                } else if cand.fast == true {
+                                    Text("FAST")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(MagpieTheme.cyan)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1.5)
+                                        .background(Capsule().fill(MagpieTheme.cyan.opacity(0.14)))
+                                }
+                                if let ctx = cand.context, ctx > 0 {
+                                    Text(RoutingStagePalette.contextShort(ctx))
+                                        .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                                        .foregroundStyle(MagpieTheme.textSecondary)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1.5)
+                                        .background(Capsule().fill(MagpieTheme.cardSecondary))
+                                }
                             }
 
                             if let why = cand.why, !why.isEmpty {
@@ -997,6 +1020,9 @@ struct RoutingRouteDetailSheet: View {
                 }
                 if let served = route.served, !served.isEmpty {
                     detailRow(label: String(localized: "应答服务节点"), value: served)
+                }
+                if let wire = route.effectiveWireModel {
+                    detailRow(label: String(localized: "上游实际模型"), value: wire)
                 }
             }
         }

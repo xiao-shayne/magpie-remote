@@ -12,6 +12,7 @@ struct MaskingView: View {
     """
     @State private var showingClearConfirm = false
     @State private var selectedRecord: MaskingRecordDTO?
+    @State private var lastSearchedQuery = ""
 
     private var settings: SettingsDTO? { app.state?.settings }
     private var isOn: Bool { settings?.redact ?? false }
@@ -30,6 +31,16 @@ struct MaskingView: View {
                 .padding(.vertical, 14)
             }
             .magpiePageBackground()
+            .searchable(text: $viewModel.query, prompt: String(localized: "搜索脱敏过的词或占位符…"))
+            .task(id: viewModel.query) {
+                guard viewModel.query != lastSearchedQuery else { return }
+                try? await Task.sleep(for: .milliseconds(300))
+                if Task.isCancelled { return }
+                lastSearchedQuery = viewModel.query
+                if let client = app.client {
+                    await viewModel.reloadRecords(client: client)
+                }
+            }
             .navigationTitle(String(localized: "Masking"))
             .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .navigationBarTitleDisplayMode(.large)
@@ -288,6 +299,18 @@ struct MaskingView: View {
                         set: { setSetting("redactModel", $0) }
                     )
                 )
+
+                divider
+
+                ruleRow(
+                    title: String(localized: "自定义词忽略大小写"),
+                    subtitle: String(localized: "开启后自定义敏感词表不区分大小写匹配"),
+                    icon: "textformat",
+                    isOn: Binding(
+                        get: { settings?.redactWordsAnyCase ?? false },
+                        set: { setSetting("redactWordsAnyCase", $0) }
+                    )
+                )
             }
             .magpieCard(padding: 0)
         }
@@ -448,6 +471,18 @@ struct MaskingView: View {
                 .magpieCard()
             }
 
+            if viewModel.hasUnknownSearchValues && !viewModel.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                HStack(spacing: 7) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundStyle(MagpieTheme.amber)
+                    Text(String(localized: "部分重启前的记录原文已不在内存中，无法按原词检索，仅支持按占位符匹配。"))
+                        .font(.caption2)
+                        .foregroundStyle(MagpieTheme.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .magpieCard(padding: 10)
+            }
+
             if viewModel.records.isEmpty {
                 emptyRecords
             } else {
@@ -523,6 +558,13 @@ struct MaskingView: View {
                 .font(.caption2)
                 .foregroundStyle(MagpieTheme.textMuted)
                 .lineLimit(1)
+
+                if let hits = record.hits, !hits.isEmpty {
+                    Text(String(localized: "命中：\(hits.joined(separator: ", "))"))
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(MagpieTheme.accent)
+                        .lineLimit(1)
+                }
             }
 
             Spacer(minLength: 6)
@@ -566,9 +608,7 @@ struct MaskingView: View {
         guard let client = app.client else { return }
         MagpieHaptics.light()
         Task {
-            let body: [String: Bool] = [key: value]
-            if let data = try? JSONEncoder().encode(body) {
-                _ = try? await client.sendData(Endpoint(path: "/api/settings", method: .post, body: data))
+            if (try? await client.patchSettings(key: key, value: value)) != nil {
                 await app.refresh()
                 MagpieHaptics.success()
             }

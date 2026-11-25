@@ -127,7 +127,14 @@ struct SessionReadSourceDTO: Codable, Sendable, Hashable, Identifiable {
     var name: String?
     var icon: String?
     var on: Bool?
+    /// 新检测到且尚未单独关闭的 Agent（readAgentJSON.new）。
+    var isNew: Bool?
 
     var id: String { agent ?? name ?? "source" }
     var displayName: String { name ?? agent ?? "Agent" }
+
+    enum CodingKeys: String, CodingKey {
+        case agent, name, icon, on
+        case isNew = "new"
+    }
 }

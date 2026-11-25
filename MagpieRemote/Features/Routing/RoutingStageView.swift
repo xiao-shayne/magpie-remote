@@ -353,36 +353,65 @@ enum RoutingStagePalette {
 
     static func strategyShort(_ raw: String?) -> String? {
         switch raw {
-        case "smart": return String(localized: "智能")
+        case "", nil, "smart": return String(localized: "额度")
         case "order": return String(localized: "按序")
+        case "drain": return String(localized: "用完")
         case "rotate": return String(localized: "轮询")
         case "usage": return String(localized: "少用")
-        case "pace": return String(localized: "节奏")
+        case "pace": return String(localized: "到期")
         case "weight": return String(localized: "加权")
+        case "free": return String(localized: "免费")
         case "fast", "fastest", "speed": return String(localized: "测速")
+        case "cheap": return String(localized: "低价")
+        case "expiring": return String(localized: "先到期")
+        case "fit": return String(localized: "小窗")
+        case "manual": return String(localized: "手动")
         default: return raw?.isEmpty == false ? raw : nil
         }
     }
 
     static func strategyDescription(_ raw: String?) -> String {
         switch raw {
-        case "smart":
-            return String(localized: "智能：有余量的账号中额度最先重置的排第一，以免剩余额度在重置时作废。")
+        case "", nil, "smart":
+            return String(localized: "额度优先：有余量的账号中额度最先重置的排第一，以免剩余额度在重置时作废。")
         case "order":
             return String(localized: "按序：按账号列表的顺序依次尝试，前面的账号不能应答时才往后走。")
+        case "drain":
+            return String(localized: "逐个用完：固定用完当前账号额度再切下一个，前面恢复也不抢回流量。")
         case "rotate":
             return String(localized: "轮询：在可用账号之间轮流分配请求，让每个账号的用量保持均衡。")
         case "usage":
             return String(localized: "少用优先：优先选择当前用量最低、余量最多的账号。")
         case "pace":
-            return String(localized: "节奏优先：选择剩余额度与重置时间最匹配的账号，尽量不让额度闲置或提前用尽。")
+            return String(localized: "到期前用完：选择剩余额度与重置时间最匹配的账号，尽量不让额度闲置或提前用尽。")
         case "weight":
             return String(localized: "加权：按账号权重分配请求，权重高的账号承担更多调用。")
+        case "free":
+            return String(localized: "免费优先：优先使用不消耗配额或免费的成员。")
         case "fast", "fastest", "speed":
-            return String(localized: "测速优先：优先选择响应最快的账号。")
+            return String(localized: "测速优先：优先选择最近首 token 与输出最快的账号。")
+        case "cheap":
+            return String(localized: "最低价优先：按当前价格与时段汇率选择最便宜的成员。")
+        case "expiring":
+            return String(localized: "免费额度先到期：先消耗即将重置或过期的免费额度，再用付费额度。")
+        case "fit":
+            return String(localized: "小上下文优先：选择能装下本次请求的最小上下文窗口模型，把大窗口留给长对话。")
+        case "manual":
+            return String(localized: "手动指定：所有请求固定发往选定成员。")
         default:
             return String(localized: "网关正在实时权衡账号，选择这次请求的去向。")
         }
+    }
+
+    static func contextShort(_ tokens: Int) -> String {
+        if tokens >= 1_000_000 {
+            let m = Double(tokens) / 1_000_000
+            return m == m.rounded() ? "\(Int(m))M" : String(format: "%.1fM", m)
+        }
+        if tokens >= 1_000 {
+            return "\(tokens / 1_000)K"
+        }
+        return "\(tokens)"
     }
 
     static func count(_ value: Int) -> String {
@@ -670,6 +699,12 @@ private struct RoutingStageAccountRow: View {
         } else if let balance = account.balance, !balance.isEmpty {
             parts.append(balance)
         }
+        if let ctx = account.context, ctx > 0 {
+            parts.append(String(localized: "窗口 \(RoutingStagePalette.contextShort(ctx))"))
+        }
+        if let tps = account.lateTps, tps > 0 {
+            parts.append(String(format: "%.0f tok/s", tps))
+        }
         if parts.isEmpty { return String(localized: "可用") }
         return parts.joined(separator: " · ")
     }
@@ -726,6 +761,22 @@ private struct RoutingStageAccountRow: View {
                                         .fill(MagpieTheme.cardSecondary)
                                 )
                                 .lineLimit(1)
+                        }
+
+                        if account.ultra == true {
+                            Text("ULTRA")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(MagpieTheme.purple)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(MagpieTheme.purple.opacity(0.14), in: Capsule())
+                        } else if account.fast == true {
+                            Text("FAST")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(MagpieTheme.cyan)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(MagpieTheme.cyan.opacity(0.14), in: Capsule())
                         }
 
                         if account.fallback == true {

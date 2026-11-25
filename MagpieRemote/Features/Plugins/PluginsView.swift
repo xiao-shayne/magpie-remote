@@ -324,6 +324,47 @@ struct PluginsView: View {
                     }
                 }
             }
+
+            if !viewModel.leftovers.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    MagpieSectionLabel(
+                        title: String(localized: "残留依赖包"),
+                        detail: "\(viewModel.leftovers.count)"
+                    )
+                    VStack(spacing: 0) {
+                        ForEach(Array(viewModel.leftovers.enumerated()), id: \.element.id) { index, item in
+                            HStack(spacing: 10) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(item.name)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(MagpieTheme.textPrimary)
+                                    Text(item.version.map { "\(item.spec) · v\($0)" } ?? item.spec)
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundStyle(MagpieTheme.textMuted)
+                                        .lineLimit(1)
+                                }
+                                Spacer(minLength: 8)
+                                Button(String(localized: "清理")) {
+                                    guard let client = app.client else { return }
+                                    Task { await viewModel.dropLeftover(client: client, spec: item.spec) }
+                                }
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(MagpieTheme.red)
+                                .buttonStyle(.plain)
+                                .disabled(viewModel.isOperating)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+
+                            if index < viewModel.leftovers.count - 1 {
+                                Divider().background(MagpieTheme.borderSubtle).padding(.leading, 14)
+                            }
+                        }
+                    }
+                    .magpieCard(padding: 0)
+                }
+                .padding(.top, 4)
+            }
         }
     }
 

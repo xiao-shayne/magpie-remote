@@ -4,12 +4,15 @@ import Foundation
 /// 具备高度健壮的容错解码设计，对任意未知或类型变动字段平滑兜底，杜绝解析崩溃。
 struct SettingsDTO: Codable, Sendable, Hashable {
     // 通用外观与偏好
+    var name: String?
+    var nameEnv: String?
     var theme: String?
     var lang: String?
     var currency: String?
     var tray: String?
     var sessionTerminal: String?
     var updateEvery: Int?
+    var updateChannel: String?
     var textSize: Int?
     var dayStart: Int?
     var quotaLeft: Bool?
@@ -19,6 +22,9 @@ struct SettingsDTO: Codable, Sendable, Hashable {
     var lan: Bool?
     var lanKeyId: String?
     var gatewayConversations: Bool?
+    var proxyNow: String?
+    var proxySource: String?
+    var proxies: [SavedProxyDTO]?
 
     // 隐私与脱敏
     var redact: Bool?
@@ -26,13 +32,25 @@ struct SettingsDTO: Codable, Sendable, Hashable {
     var redactModel: Bool?
     var redactShape: Bool?
     var redactModelName: String?
+    var redactModelDir: String?
+    var redactWordsAnyCase: Bool?
 
     // 专属优化与状态
     var claudeCacheEnabled: Bool?
     var claudeCacheKnobs: [ClaudeCacheKnobDTO]?
     var claudeAttributionOff: Bool?
     var claudeAttributionRaw: String?
+    var claudeNoExtraUsage: Bool?
+    var claudeRegionHold: Bool?
     var visionAutoModel: String?
+    var imageResolution: String?
+    var bareModelIDs: Bool?
+    var bareModelIDsOnly: Bool?
+    var codexSuggestions: String?
+    var routerAllTools: Bool?
+    var routerNoCode: Bool?
+    var requestArchiveMB: Int?
+    var trayAnthropicMark: Bool?
     var version: String?
     var gateway: String?
     var dir: String?
@@ -99,18 +117,36 @@ struct SettingsDTO: Codable, Sendable, Hashable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
+        self.name = try? container.decodeIfPresent(String.self, forKey: .name)
+        self.nameEnv = try? container.decodeIfPresent(String.self, forKey: .nameEnv)
         self.theme = try? container.decodeIfPresent(String.self, forKey: .theme)
         self.lang = try? container.decodeIfPresent(String.self, forKey: .lang)
         self.currency = try? container.decodeIfPresent(String.self, forKey: .currency)
         self.sessionTerminal = try? container.decodeIfPresent(String.self, forKey: .sessionTerminal)
+        self.updateChannel = try? container.decodeIfPresent(String.self, forKey: .updateChannel)
         self.lan = try? container.decodeIfPresent(Bool.self, forKey: .lan)
         self.lanKeyId = try? container.decodeIfPresent(String.self, forKey: .lanKeyId)
         self.gatewayConversations = try? container.decodeIfPresent(Bool.self, forKey: .gatewayConversations)
+        self.proxyNow = try? container.decodeIfPresent(String.self, forKey: .proxyNow)
+        self.proxySource = try? container.decodeIfPresent(String.self, forKey: .proxySource)
+        self.proxies = try? container.decodeIfPresent([SavedProxyDTO].self, forKey: .proxies)
         self.redact = try? container.decodeIfPresent(Bool.self, forKey: .redact)
         self.redactPersonal = try? container.decodeIfPresent(Bool.self, forKey: .redactPersonal)
         self.redactModel = try? container.decodeIfPresent(Bool.self, forKey: .redactModel)
         self.redactShape = try? container.decodeIfPresent(Bool.self, forKey: .redactShape)
         self.redactModelName = try? container.decodeIfPresent(String.self, forKey: .redactModelName)
+        self.redactModelDir = try? container.decodeIfPresent(String.self, forKey: .redactModelDir)
+        self.redactWordsAnyCase = try? container.decodeIfPresent(Bool.self, forKey: .redactWordsAnyCase)
+        self.claudeNoExtraUsage = try? container.decodeIfPresent(Bool.self, forKey: .claudeNoExtraUsage)
+        self.claudeRegionHold = try? container.decodeIfPresent(Bool.self, forKey: .claudeRegionHold)
+        self.imageResolution = try? container.decodeIfPresent(String.self, forKey: .imageResolution)
+        self.bareModelIDs = try? container.decodeIfPresent(Bool.self, forKey: .bareModelIDs)
+        self.bareModelIDsOnly = try? container.decodeIfPresent(Bool.self, forKey: .bareModelIDsOnly)
+        self.codexSuggestions = try? container.decodeIfPresent(String.self, forKey: .codexSuggestions)
+        self.routerAllTools = try? container.decodeIfPresent(Bool.self, forKey: .routerAllTools)
+        self.routerNoCode = try? container.decodeIfPresent(Bool.self, forKey: .routerNoCode)
+        self.requestArchiveMB = try? container.decodeIfPresent(Int.self, forKey: .requestArchiveMB)
+        self.trayAnthropicMark = try? container.decodeIfPresent(Bool.self, forKey: .trayAnthropicMark)
         self.version = try? container.decodeIfPresent(String.self, forKey: .version)
         self.gateway = try? container.decodeIfPresent(String.self, forKey: .gateway)
         self.dir = try? container.decodeIfPresent(String.self, forKey: .dir)
@@ -162,19 +198,110 @@ struct SettingsDTO: Codable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case theme, lang, currency, tray, sessionTerminal, updateEvery, textSize
+        case name, nameEnv, theme, lang, currency, tray, sessionTerminal, updateEvery, updateChannel, textSize
         case dayStart, quotaLeft, chineseUnits
-        case lan, lanKeyId, gatewayConversations
+        case lan, lanKeyId, gatewayConversations, proxyNow, proxySource, proxies
         case redact, redactPersonal, redactModel
-        case redactShape, redactModelName
+        case redactShape, redactModelName, redactModelDir, redactWordsAnyCase
         case claudeCacheEnabled = "claudeCache"
         case claudeAttributionOff = "claudeAttribution"
         case claudeAttributionRaw
+        case claudeNoExtraUsage, claudeRegionHold
         case visionAutoModel = "visionAuto"
+        case imageResolution, bareModelIDs, bareModelIDsOnly, codexSuggestions
+        case routerAllTools, routerNoCode, requestArchiveMB, trayAnthropicMark
         case version, gateway, dir
         case awake = "\u{6B}\u{65}\u{65}\u{70}\u{41}\u{77}\u{61}\u{6B}\u{65}"
         case fullContext, codexAgentsV1, trayUsageEvery, quotaReads, plainNames
         case otel
+    }
+}
+
+/// 命名代理（支持 HTTP / SOCKS5 / SSH，`savedProxyJSON`）。
+struct SavedProxyDTO: Codable, Sendable, Identifiable, Hashable {
+    var id: String
+    var name: String
+    var url: String
+    var user: String?
+    var hasPass: Bool?
+    var hasKey: Bool?
+    var hostKey: String?
+    var uses: [ProxyUseDTO]?
+    /// 服务端 `savedProxyJSON.check`（上次连通性检测结果）。
+    var test: ProxyTestResultDTO?
+
+    var isSSH: Bool {
+        url.lowercased().hasPrefix("ssh://")
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, url, user, hasPass, hasKey, hostKey, uses
+        case test = "check"
+    }
+}
+
+struct ProxyUseDTO: Codable, Sendable, Hashable {
+    var whereUsed: String?
+    var provider: String?
+    var account: String?
+
+    var displayLabel: String? {
+        if let whereUsed, !whereUsed.isEmpty {
+            switch whereUsed {
+            case "global": return String(localized: "全局代理")
+            case "plugins": return String(localized: "插件下载")
+            case "updates": return String(localized: "更新检查")
+            default: return whereUsed
+            }
+        }
+        if let provider, !provider.isEmpty {
+            if let account, !account.isEmpty {
+                return "\(provider) (\(account))"
+            }
+            return provider
+        }
+        return account?.isEmpty == false ? account : nil
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case whereUsed = "where"
+        case provider, account
+    }
+}
+
+struct ProxyTestResultDTO: Codable, Sendable, Hashable {
+    var ok: Bool
+    var ms: Int64?
+    var ip: String?
+    var loc: String?
+    var error: String?
+    var why: String?
+    var addr: String?
+    var was: String?
+    var now: String?
+    var at: Int64?
+}
+
+/// `GET /api/update`：服务器 magpie 的更新状态与频道信息（对齐 upstream `updateJSON`）。
+struct UpdateStatusDTO: Codable, Sendable, Hashable {
+    var state: String?
+    var current: String?
+    var latest: String?
+    var channel: String?
+    var newest: String?
+    var ahead: Bool?
+    var run: Int64?
+    var stuck: String?
+    var retry: Bool?
+    var error: String?
+    var notes: String?
+    var url: String?
+    var image: String?
+    var done: Int64?
+    var total: Int64?
+
+    var hasUpdate: Bool {
+        state == "available" || state == "found" || state == "ready" || state == "downloading"
     }
 }
 
@@ -215,6 +342,7 @@ struct BackupExportResultDTO: Codable, Sendable {
     var agents: Int?
     var library: Bool?
     var signIns: Int?
+    var usage: Int?
 }
 
 /// Claude Code 提示词缓存的一个 knob（cache_ttl / subagent_cache_ttl）。

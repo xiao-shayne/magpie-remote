@@ -204,6 +204,11 @@ struct LibraryMarketItemDTO: Codable, Sendable, Identifiable, Hashable {
     var optIn: Bool?
     var homepage: String?
     var inputs: [LibraryMarketInputDTO]?
+    // Claude 插件市场
+    var author: String?
+    var category: String?
+    var marketplace: String?
+    var version: String?
     // 已安装时它在库中的名字
     var have: String?
 
@@ -221,7 +226,8 @@ struct LibraryMarketItemDTO: Codable, Sendable, Identifiable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, name, title, publisher, icon, description
         case source, skillId, installs, official
-        case transport, signIn, runs, featured, unready, optIn, homepage, inputs, have
+        case transport, signIn, runs, featured, unready, optIn, homepage, inputs
+        case author, category, marketplace, version, have
     }
 
     init(from decoder: Decoder) throws {
@@ -244,6 +250,10 @@ struct LibraryMarketItemDTO: Codable, Sendable, Identifiable, Hashable {
         self.optIn = try? c.decodeIfPresent(Bool.self, forKey: .optIn)
         self.homepage = try? c.decodeIfPresent(String.self, forKey: .homepage)
         self.inputs = try? c.decodeIfPresent([LibraryMarketInputDTO].self, forKey: .inputs)
+        self.author = try? c.decodeIfPresent(String.self, forKey: .author)
+        self.category = try? c.decodeIfPresent(String.self, forKey: .category)
+        self.marketplace = try? c.decodeIfPresent(String.self, forKey: .marketplace)
+        self.version = try? c.decodeIfPresent(String.self, forKey: .version)
         self.have = try? c.decodeIfPresent(String.self, forKey: .have)
     }
 }
@@ -469,6 +479,44 @@ final class LibraryViewModel {
         }
     }
 
+    /// 从市场安装 Claude 插件（`plugins/install`，source + names + agents）。
+    func installMarketClaudePlugin(
+        client: MagpieAPIClient,
+        item: LibraryMarketItemDTO,
+        agents: [String]
+    ) async -> Bool {
+        guard let source = item.source, let name = item.name, !source.isEmpty, !name.isEmpty else {
+            marketError = String(localized: "这个插件缺少来源信息")
+            return false
+        }
+        return await performMarket(
+            client: client,
+            path: "/api/library/plugins/install",
+            body: ["Source": source, "Names": [name], "Agents": agents],
+            name: item.displayName
+        )
+    }
+
+    /// 开启或关闭 Skill Router（`POST /api/library/skills/router`）。
+    func setSkillRouter(client: MagpieAPIClient, on: Bool) async {
+        _ = await perform(client: client, path: "/api/library/skills/router", body: ["On": on])
+    }
+
+    /// 开启或关闭 MCP Router（`POST /api/library/servers/hub`）。
+    func setMCPHub(client: MagpieAPIClient, on: Bool) async {
+        _ = await perform(client: client, path: "/api/library/servers/hub", body: ["On": on])
+    }
+
+    /// MCP Router 工具暴露方式（`POST /api/library/servers/hub-tools`：false = 按需加载，true = 全部暴露）。
+    func setHubAllTools(client: MagpieAPIClient, allTools: Bool) async {
+        _ = await perform(client: client, path: "/api/library/servers/hub-tools", body: ["On": allTools])
+    }
+
+    /// MCP Router 的 `run_code` 代码模式（`POST /api/library/servers/hub-code`）。
+    func setHubCode(client: MagpieAPIClient, on: Bool) async {
+        _ = await perform(client: client, path: "/api/library/servers/hub-code", body: ["On": on])
+    }
+
     func setSkillAgents(client: MagpieAPIClient, name: String, agents: [String]) async {
         await perform(client: client, path: "/api/library/skills/agents", body: ["Name": name, "Agents": agents])
     }
@@ -526,6 +574,7 @@ final class LibraryViewModel {
         )
     }
 
+    @discardableResult
     private func perform(client: MagpieAPIClient, path: String, body: [String: Any]) async -> Bool {
         guard JSONSerialization.isValidJSONObject(body),
               let data = try? JSONSerialization.data(withJSONObject: body) else {

@@ -5,6 +5,7 @@ import Observation
 @MainActor
 final class PluginsViewModel {
     var plugins: [PluginEntryDTO] = []
+    var leftovers: [PluginLeftoverDTO] = []
     var listings: [PluginListingDTO] = []
     var searchHits: [PluginSearchHitDTO] = []
     var updates: PluginUpdatesDTO?
@@ -32,6 +33,7 @@ final class PluginsViewModel {
 
     func apply(_ state: PluginsResponseDTO) {
         self.plugins = state.plugins
+        self.leftovers = state.leftovers ?? []
         self.hasBun = state.bun ?? false
         self.bunVersion = state.bunVersion
         self.isMirrorOn = state.mirror ?? false
@@ -180,6 +182,26 @@ final class PluginsViewModel {
             )
             apply(state)
             await loadUpdates(client: client)
+            MagpieHaptics.success()
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// 清理安装失败残留的未注册依赖包（`POST /api/plugins/leftover`）。
+    func dropLeftover(client: MagpieAPIClient, spec: String) async {
+        isOperating = true
+        errorMessage = nil
+        defer { isOperating = false }
+        do {
+            struct LeftoverBody: Encodable { var Spec: String }
+            let state: PluginsResponseDTO = try await client.send(
+                .post("/api/plugins/leftover", body: LeftoverBody(Spec: spec)),
+                as: PluginsResponseDTO.self,
+                timeout: 120
+            )
+            apply(state)
+            lastAction = String(localized: "已清理残留依赖包")
             MagpieHaptics.success()
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription

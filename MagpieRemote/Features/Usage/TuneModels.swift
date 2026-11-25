@@ -124,6 +124,11 @@ struct TuneAdviceDTO: Codable, Sendable, Identifiable {
         return currentValue == proposedValue
     }
 
+    /// Codex `config.toml` 中存在用户自设值且可由 magpie 接管（`POST /api/tune/takeover`）。
+    var canTakeOver: Bool {
+        setting?.bool("take") == true
+    }
+
     var subtitle: String? {
         var parts: [String] = []
         if let calls { parts.append(String(localized: "\(calls) 次调用")) }

@@ -210,6 +210,81 @@ final class UsageViewModel {
         await tuneChange(client: client, path: "/api/tune/undo", agent: agent, advice: advice, value: "")
     }
 
+    /// 接管 Codex `config.toml` 中原有的压缩阈值（`POST /api/tune/takeover`）。
+    func takeOverTune(client: MagpieAPIClient, agent: String) async -> Bool {
+        isOperating = true
+        errorMessage = nil
+        defer { isOperating = false }
+        do {
+            struct Body: Encodable { let Agent: String }
+            _ = try await client.sendData(
+                try Endpoint.post("/api/tune/takeover", body: Body(Agent: agent))
+            )
+            await loadTune(client: client)
+            MagpieHaptics.success()
+            return true
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            return false
+        }
+    }
+
+    var isWarmingAll = false
+    var warmAllMessage: String?
+
+    /// 一键预热指定订阅类型（`"codex"` / `"claude"`）的所有待预热账号（`POST /api/warm-all`）。
+    func warmAll(client: MagpieAPIClient, agents: [String]) async {
+        let targets = agents.filter { $0 == "codex" || $0 == "claude" }
+        guard !targets.isEmpty else {
+            warmAllMessage = String(localized: "当前没有支持预热的订阅账号")
+            return
+        }
+        isWarmingAll = true
+        warmAllMessage = nil
+        errorMessage = nil
+        defer { isWarmingAll = false }
+
+        struct Body: Encodable { let Agent: String }
+        var allResults: [WarmAllResultDTO] = []
+        var requestErrors: [String] = []
+
+        for agent in targets {
+            do {
+                let res: WarmAllResponseDTO = try await client.send(
+                    .post("/api/warm-all", body: Body(Agent: agent)),
+                    as: WarmAllResponseDTO.self,
+                    timeout: 120
+                )
+                allResults.append(contentsOf: res.results)
+            } catch {
+                let msg = (error as? APIError)?.errorDescription ?? error.localizedDescription
+                requestErrors.append("\(agent): \(msg)")
+            }
+        }
+
+        if allResults.isEmpty, !requestErrors.isEmpty {
+            errorMessage = requestErrors.joined(separator: "；")
+            return
+        }
+
+        let okCount = allResults.filter(\.isWarmed).count
+        let errCount = allResults.filter { !($0.error ?? "").isEmpty }.count + requestErrors.count
+        let skipCount = allResults.filter { !($0.skip ?? "").isEmpty && ($0.error ?? "").isEmpty }.count
+        if okCount == 0 && errCount == 0 {
+            warmAllMessage = skipCount > 0
+                ? String(localized: "全部 \(skipCount) 个账号窗口均已运行中")
+                : String(localized: "当前没有需要预热的账号")
+        } else if errCount == 0 {
+            warmAllMessage = String(localized: "已预热 \(okCount) 个账号")
+            MagpieHaptics.success()
+        } else {
+            warmAllMessage = String(localized: "预热完成：\(okCount) 成功，\(errCount) 失败")
+        }
+        if let updated = try? await client.send(.get("/api/usage/quotas"), as: [QuotaItemDTO].self, timeout: 60) {
+            quotas = updated
+        }
+    }
+
     private func tuneChange(
         client: MagpieAPIClient,
         path: String,

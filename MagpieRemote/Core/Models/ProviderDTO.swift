@@ -11,6 +11,8 @@ struct ProviderModelDTO: Codable, Sendable, Identifiable, Hashable, CustomString
     /// 用户保留的推理档；缺省表示全部保留。
     var kept: [String]?
     var images: Bool?
+    /// 若命中 Settings 的禁用模型规则，这里记录匹配的规则串。
+    var disabled: String?
 
     init(id: String, name: String? = nil, on: Bool? = nil) {
         self.id = id
@@ -38,6 +40,7 @@ struct ProviderModelDTO: Codable, Sendable, Identifiable, Hashable, CustomString
             self.efforts = nil
             self.kept = nil
             self.images = nil
+            self.disabled = nil
             return
         }
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -49,6 +52,7 @@ struct ProviderModelDTO: Codable, Sendable, Identifiable, Hashable, CustomString
         self.efforts = try container.decodeIfPresent([String].self, forKey: .efforts)
         self.kept = try container.decodeIfPresent([String].self, forKey: .kept)
         self.images = try container.decodeIfPresent(Bool.self, forKey: .images)
+        self.disabled = try container.decodeIfPresent(String.self, forKey: .disabled)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -61,10 +65,11 @@ struct ProviderModelDTO: Codable, Sendable, Identifiable, Hashable, CustomString
         try container.encodeIfPresent(efforts, forKey: .efforts)
         try container.encodeIfPresent(kept, forKey: .kept)
         try container.encodeIfPresent(images, forKey: .images)
+        try container.encodeIfPresent(disabled, forKey: .disabled)
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, on, context, output, efforts, kept, images
+        case id, name, on, context, output, efforts, kept, images, disabled
     }
 }
 
@@ -104,7 +109,22 @@ struct ProviderDTO: Codable, Sendable, Identifiable, Hashable {
     var queueLimit: Int?
     var queueWait: Int?
     var maxRPM: Int?
+    var maxImages: [String: Int]?
     var priceRate: Double?
+    /// sub2api 中转美元充值汇率，以及各 Key 的组倍率。
+    var topUpRate: Double?
+    var keyGroupRates: [String: Double]?
+    /// 嵌入与重排模型列表（不参与对话模型勾选）。
+    var retrieval: Int?
+    var embedIds: [String]?
+    var rerankIds: [String]?
+    /// Claude 订阅账号的出口地区检测结果。
+    var egress: EgressResultDTO?
+    /// 所选命名代理已被删除时的提示。
+    var proxyGone: String?
+    /// Remote magpie：自动在本机连接远端已接入的 Agent。
+    var connectAgents: Bool?
+    var libraryShared: Bool?
     // 官方编辑器的高级字段
     var fallback: [String]?
     var unlisted: Bool?
@@ -225,6 +245,7 @@ struct ProviderDTO: Codable, Sendable, Identifiable, Hashable {
         var protocolName: String?
         var plan: String?
         var weight: Int?
+        var rest: KeyRestDTO?
 
         var displayName: String {
             if let name, !name.isEmpty { return name }
@@ -245,9 +266,102 @@ struct ProviderDTO: Codable, Sendable, Identifiable, Hashable {
         enum CodingKeys: String, CodingKey {
             case id, name, masked, active, on
             case protocolName = "protocol"
-            case plan, weight
+            case plan, weight, rest
         }
     }
+
+    struct KeyRestDTO: Codable, Sendable, Hashable {
+        var why: String?
+        var status: Int?
+        var until: String?
+        var key: String?
+        var probed: Bool?
+        var by: String?
+        var model: String?
+        var error: String?
+        var rate: Bool?
+        /// 冷却已结束但上游限额仍在生效的提示。
+        var notice: Bool?
+        var at: String?
+    }
+}
+
+/// Claude 订阅出口地区检测结果（`egress.Result`）。
+struct EgressResultDTO: Codable, Sendable, Hashable {
+    var state: String
+    var loc: String?
+    var at: String?
+    var error: String?
+    var via: String?
+
+    var isUnsupported: Bool {
+        state == "unsupported" || state == "blocked"
+    }
+
+    var isSupported: Bool {
+        state == "ok" || state == "supported"
+    }
+}
+
+/// `POST /api/relay-check`：对中转站单模型的准确性、工具调用与速度实测结果。
+struct RelayCheckResultDTO: Codable, Sendable, Hashable {
+    var provider: String
+    var model: String
+    var parts: [RelayPartDTO]
+
+    var passedCount: Int { parts.filter { $0.ok && $0.match }.count }
+}
+
+struct RelayPartDTO: Codable, Sendable, Identifiable, Hashable {
+    var kind: String
+    var ask: String?
+    var ok: Bool
+    var match: Bool
+    var status: Int?
+    var error: String?
+    var want: String?
+    var got: String?
+    var served: String?
+    var by: String?
+    var ms: Int64
+    var ttftMs: Int64?
+    var tps: Double?
+    var input: Int?
+    var output: Int?
+    var promptChars: Int?
+    var tries: Int?
+
+    var id: String { "\(kind)-\(ask ?? "")" }
+
+    enum CodingKeys: String, CodingKey {
+        case kind, ask, ok, match, status, error, want, got, served, by, ms
+        case ttftMs = "ttft_ms"
+        case tps, input, output
+        case promptChars = "prompt_chars"
+        case tries
+    }
+}
+
+/// 下架但仍在启用的旧插件提醒。
+struct WithdrawnPluginDTO: Codable, Sendable, Identifiable, Hashable {
+    var id: String
+    var name: String?
+    var instead: String?
+    var insteadId: String?
+    var packageName: String?
+    var spec: String?
+    var off: Bool?
+    var beside: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, instead, insteadId, spec, off, beside
+        case packageName = "package"
+    }
+}
+
+struct UnremovedProviderDTO: Codable, Sendable, Identifiable, Hashable {
+    var id: String
+    var error: String?
 }
 
 /// 预设 Provider 模板
@@ -325,6 +439,10 @@ struct ProvidersResponseDTO: Codable, Sendable {
     var presets: [PresetDTO]?
     /// 插件提供的订阅（官方 Add 面板的 plugin subs）。
     var plugins: [PluginSubDTO]?
+    var withdrawn: [WithdrawnPluginDTO]?
+    var agyMove: [String]?
+    var placed: String?
+    var unremoved: [UnremovedProviderDTO]?
 }
 
 /// 插件提供的一个订阅：登录后成为一个 Provider。
@@ -486,6 +604,8 @@ struct ProviderSaveRequest: Encodable, Sendable {
     var queueWait: Int? = nil
     var maxRPM: Int? = nil
     var priceRate: Double? = nil
+    var topUpRate: Double? = nil
+    var connectAgents: Bool? = nil
     var from: String? = nil
     // 官方编辑器的高级字段
     var unlisted: Bool? = nil
@@ -523,7 +643,7 @@ struct ProviderSaveRequest: Encodable, Sendable {
         case isNew = "new"
         case searches, unredacted, models, proxy, routing, affinity, sink
         case useFirst, noStandIn, maxConcurrency, queueLimit, queueWait, maxRPM
-        case priceRate, from
+        case priceRate, topUpRate, connectAgents, from
         case unlisted, noModels, bestInFamily, listOff
         case headers, extraBody, replyHeaders, passHeaders
         case insecureTLS, http1, socket, limitRestOff
@@ -560,6 +680,8 @@ struct ProviderSaveRequest: Encodable, Sendable {
         try c.encodeIfPresent(queueWait, forKey: .queueWait)
         try c.encodeIfPresent(maxRPM, forKey: .maxRPM)
         try c.encodeIfPresent(priceRate, forKey: .priceRate)
+        try c.encodeIfPresent(topUpRate, forKey: .topUpRate)
+        try c.encodeIfPresent(connectAgents, forKey: .connectAgents)
         try c.encodeIfPresent(from, forKey: .from)
         try c.encodeIfPresent(unlisted, forKey: .unlisted)
         try c.encodeIfPresent(noModels, forKey: .noModels)

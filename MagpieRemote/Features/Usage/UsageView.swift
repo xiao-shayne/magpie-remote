@@ -389,15 +389,70 @@ struct UsageView: View {
         }
     }
 
+    private var warmableAgents: [String] {
+        var list: [String] = []
+        if viewModel.quotas.contains(where: { $0.provider == "codex" }) { list.append("codex") }
+        if viewModel.quotas.contains(where: { $0.provider == "claude" }) { list.append("claude") }
+        return list
+    }
+
     // MARK: - 配额与余量卡片 (Web 1:1 Allowances / Quotas)
     private var quotasSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 MagpieSectionLabel(title: String(localized: "订阅额度与余量"), detail: String(localized: "\(viewModel.quotas.count) 个账户"))
                 Spacer()
+                if viewModel.isWarmingAll {
+                    ProgressView().controlSize(.small)
+                } else if warmableAgents.count > 1 {
+                    Menu {
+                        Button(String(localized: "预热全部 (Codex + Claude)")) {
+                            if let client = app.client {
+                                Task { await viewModel.warmAll(client: client, agents: warmableAgents) }
+                            }
+                        }
+                        Button(String(localized: "仅预热 Codex")) {
+                            if let client = app.client {
+                                Task { await viewModel.warmAll(client: client, agents: ["codex"]) }
+                            }
+                        }
+                        Button(String(localized: "仅预热 Claude")) {
+                            if let client = app.client {
+                                Task { await viewModel.warmAll(client: client, agents: ["claude"]) }
+                            }
+                        }
+                    } label: {
+                        Label(String(localized: "预热账号"), systemImage: "flame.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(MagpieTheme.amber)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3.5)
+                            .background(MagpieTheme.amber.opacity(0.14), in: Capsule())
+                    }
+                } else if let onlyAgent = warmableAgents.first {
+                    Button {
+                        if let client = app.client {
+                            Task { await viewModel.warmAll(client: client, agents: [onlyAgent]) }
+                        }
+                    } label: {
+                        Label(String(localized: "预热账号"), systemImage: "flame.fill")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(MagpieTheme.amber)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3.5)
+                            .background(MagpieTheme.amber.opacity(0.14), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
                 if viewModel.isRefreshingQuota {
                     ProgressView().controlSize(.small)
                 }
+            }
+
+            if let warmMsg = viewModel.warmAllMessage {
+                Text(warmMsg)
+                    .font(.caption)
+                    .foregroundStyle(MagpieTheme.textSecondary)
             }
 
             VStack(spacing: 8) {
@@ -442,6 +497,17 @@ struct UsageView: View {
                         .foregroundStyle(MagpieTheme.textMuted)
                 }
                 .buttonStyle(.plain)
+            }
+
+            if let readError = quota.readError, !readError.isEmpty {
+                HStack(spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 9.5))
+                    Text(readError)
+                        .font(.system(size: 10))
+                        .lineLimit(2)
+                }
+                .foregroundStyle(MagpieTheme.amber)
             }
 
             if let balance = quota.balance, !balance.isEmpty {
@@ -639,9 +705,15 @@ struct UsageView: View {
                                     Text(UsageDTO.formatTokens(group.totalTokens))
                                         .font(.system(size: 11.5, weight: .bold, design: .monospaced))
                                         .foregroundStyle(MagpieTheme.textPrimary)
-                                    Text("\(group.calls ?? 0) 次 · \(group.formattedCost)")
-                                        .font(.caption2)
-                                        .foregroundStyle(MagpieTheme.textMuted)
+                                    HStack(spacing: 4) {
+                                        Text("\(group.calls ?? 0) 次 · \(group.formattedCost)")
+                                        if let tps = group.effectiveTPS, tps > 0 {
+                                            Text(String(format: "· %.0f tok/s", tps))
+                                                .foregroundStyle(MagpieTheme.cyan)
+                                        }
+                                    }
+                                    .font(.caption2)
+                                    .foregroundStyle(MagpieTheme.textMuted)
                                 }
                             }
 
@@ -767,8 +839,72 @@ struct UsageView: View {
             // 3. 53 周日历用量热力图 (可折叠)
             heatmapCard
 
+            // 3.5 提供方与模型测速统计（upstream provider_speeds）
+            if let speeds = viewModel.ledger?.providerSpeeds, !speeds.isEmpty {
+                providerSpeedsCard(speeds)
+            }
+
             // 4. 账本流水请求列表
             ledgerList
+        }
+    }
+
+    private func providerSpeedsCard(_ speeds: [UsageProviderSpeedDTO]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            MagpieSectionLabel(
+                title: String(localized: "模型与提供方实测速度"),
+                detail: "\(speeds.count)"
+            )
+            VStack(spacing: 0) {
+                ForEach(Array(speeds.prefix(12).enumerated()), id: \.element.id) { index, item in
+                    HStack(spacing: 10) {
+                        MagpieIconView(icon: item.icon ?? item.provider, name: item.displayProvider, size: 24, cornerRadius: 6)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.displayName)
+                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(MagpieTheme.textPrimary)
+                                .lineLimit(1)
+                            HStack(spacing: 5) {
+                                Text(RoutingFormat.maskString(item.displayProvider, isMasked: maskAccounts))
+                                if let tries = item.tries, tries > 0 {
+                                    Text("· \(tries) 次")
+                                }
+                                if let failed = item.failed, failed > 0 {
+                                    Text(String(localized: "· \(failed) 失败"))
+                                        .foregroundStyle(MagpieTheme.red)
+                                }
+                                if let swapped = item.swapped, swapped > 0 {
+                                    Text(String(localized: "· \(swapped) 换型"))
+                                        .foregroundStyle(MagpieTheme.amber)
+                                }
+                            }
+                            .font(.caption2)
+                            .foregroundStyle(MagpieTheme.textMuted)
+                            .lineLimit(1)
+                        }
+                        Spacer(minLength: 4)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            if let tps = item.tps, tps > 0 {
+                                Text(String(format: "%.1f tok/s", tps))
+                                    .font(.system(size: 11.5, weight: .bold, design: .monospaced))
+                                    .foregroundStyle(MagpieTheme.cyan)
+                            }
+                            if let ttft = item.ttftMs, ttft > 0 {
+                                Text("TTFT \(ttft)ms")
+                                    .font(.system(size: 9.5, design: .monospaced))
+                                    .foregroundStyle(MagpieTheme.textMuted)
+                            }
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+
+                    if index < min(speeds.count, 12) - 1 {
+                        Divider().background(MagpieTheme.borderSubtle).padding(.leading, 46)
+                    }
+                }
+            }
+            .magpieCard(padding: 0)
         }
     }
 
@@ -1295,10 +1431,18 @@ struct UsageView: View {
                 HStack(spacing: 8) {
                     MagpieIconView(icon: row.icon ?? row.agent, name: row.displayAgent, size: 24, cornerRadius: 6)
 
-                    Text(row.model ?? String(localized: "未知模型"))
-                        .font(.system(size: 13, weight: .bold, design: .monospaced))
-                        .foregroundStyle(MagpieTheme.textPrimary)
-                        .lineLimit(1)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(row.model ?? String(localized: "未知模型"))
+                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                            .foregroundStyle(MagpieTheme.textPrimary)
+                            .lineLimit(1)
+                        if let wire = row.wire, !wire.isEmpty, wire != row.model {
+                            Text("→ \(wire)")
+                                .font(.system(size: 9.5, design: .monospaced))
+                                .foregroundStyle(MagpieTheme.textMuted)
+                                .lineLimit(1)
+                        }
+                    }
 
                     Spacer()
 
@@ -1349,6 +1493,16 @@ struct UsageView: View {
                                 .font(.system(size: 10.5, design: .monospaced))
                         }
                         .foregroundStyle(MagpieTheme.textMuted)
+                    }
+
+                    if let ttft = row.ttft, ttft > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 8.5))
+                            Text("\(ttft)ms")
+                                .font(.system(size: 10, design: .monospaced))
+                        }
+                        .foregroundStyle(MagpieTheme.cyan)
                     }
 
                     HStack(spacing: 3) {
@@ -1574,6 +1728,21 @@ struct UsageView: View {
                             .padding(.vertical, 4)
                             .background(MagpieTheme.pill, in: Capsule())
                             .foregroundStyle(MagpieTheme.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(viewModel.isOperating)
+                } else if item.canTakeOver {
+                    Button {
+                        if let client = app.client {
+                            Task { _ = await viewModel.takeOverTune(client: client, agent: agent) }
+                        }
+                    } label: {
+                        Text(String(localized: "由 magpie 接管"))
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(MagpieTheme.amber, in: Capsule())
+                            .foregroundStyle(.white)
                     }
                     .buttonStyle(.plain)
                     .disabled(viewModel.isOperating)

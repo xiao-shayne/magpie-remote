@@ -12,9 +12,61 @@ struct ModelPickerView: View {
 
     private var agent: AgentDTO? { app.state?.agents.first { $0.id == agentID } }
     private var field: FieldDTO? { agent?.fields.first { $0.key == fieldKey } }
+    private nonisolated static let effortOrder = ["off", "none", "minimal", "low", "medium", "high", "xhigh", "max"]
+
+    private var isEffortField: Bool {
+        guard let field else { return false }
+        let key = field.key.lowercased()
+        let label = field.label.lowercased()
+        return key == "effort" || key.hasSuffix("_effort") || label == "effort" || label == "thinking" || label.contains("effort")
+    }
+
     private var options: [ModelOption] {
         guard let field, let state = app.state else { return [] }
-        return state.options(for: field)
+        let raw = state.options(for: field)
+        guard isEffortField else { return raw }
+        return Self.orderedEffortOptions(raw, currentValue: field.value)
+    }
+
+    /// 对齐 upstream `levelOrder` / `effortStops`：推理档按从低到高排列，当前未在列表内的值也插回其对应档位。
+    nonisolated static func orderedEffortOptions(_ options: [ModelOption], currentValue: String) -> [ModelOption] {
+        var ranked = options.filter { effortOrder.contains($0.value.lowercased()) }
+        ranked.sort {
+            (effortOrder.firstIndex(of: $0.value.lowercased()) ?? Int.max)
+                < (effortOrder.firstIndex(of: $1.value.lowercased()) ?? Int.max)
+        }
+        var iter = ranked.makeIterator()
+        var ordered = options.map { opt -> ModelOption in
+            effortOrder.contains(opt.value.lowercased()) ? (iter.next() ?? opt) : opt
+        }
+        let cur = currentValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cur.isEmpty, !ordered.contains(where: { $0.value == cur }) else { return ordered }
+        let held = ModelOption(value: cur, label: cur, note: String(localized: "当前值"))
+        if let rank = effortOrder.firstIndex(of: cur.lowercased()) {
+            if let idx = ordered.firstIndex(where: {
+                guard let r = effortOrder.firstIndex(of: $0.value.lowercased()) else { return false }
+                return r > rank
+            }) {
+                ordered.insert(held, at: idx)
+            } else {
+                ordered.append(held)
+            }
+        } else {
+            ordered.insert(held, at: 0)
+        }
+        return ordered
+    }
+
+    private var unservedGroups: [UnservedGroupDTO] {
+        let all = field?.unserved ?? []
+        guard !searchText.isEmpty else { return all }
+        let query = searchText.lowercased()
+        return all.filter {
+            $0.label.lowercased().contains(query)
+                || $0.ref.lowercased().contains(query)
+                || $0.value.lowercased().contains(query)
+                || $0.why.lowercased().contains(query)
+        }
     }
 
     private var filtered: [ModelOption] {
@@ -113,6 +165,38 @@ struct ModelPickerView: View {
                     }
                 }
                 .magpieCard(padding: 0)
+
+                // 未提供的路由组（upstream field.unserved）
+                if !unservedGroups.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(String(localized: "未在此列表中的路由组"))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(MagpieTheme.textMuted)
+                            .padding(.horizontal, 4)
+
+                        VStack(spacing: 0) {
+                            ForEach(Array(unservedGroups.enumerated()), id: \.element.id) { index, item in
+                                if item.isPickable {
+                                    Button {
+                                        selectUnserved(item)
+                                    } label: {
+                                        unservedRowContent(item)
+                                    }
+                                    .buttonStyle(.plain)
+                                } else {
+                                    unservedRowContent(item)
+                                        .opacity(0.6)
+                                }
+
+                                if index < unservedGroups.count - 1 {
+                                    Divider()
+                                        .background(MagpieTheme.borderSubtle)
+                                }
+                            }
+                        }
+                        .magpieCard(padding: 0)
+                    }
+                }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -131,10 +215,66 @@ struct ModelPickerView: View {
         }
     }
 
+    @ViewBuilder
+    private func unservedRowContent(_ item: UnservedGroupDTO) -> some View {
+        HStack(spacing: 12) {
+            if let firstIcon = item.icons?.first, !firstIcon.isEmpty {
+                MagpieIconView(icon: firstIcon, name: item.label, size: 22, cornerRadius: 5)
+            } else {
+                Image(systemName: item.isPickable ? "square.stack.3d.up" : "eye.slash")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(item.isPickable ? MagpieTheme.accent : MagpieTheme.textMuted)
+                    .frame(width: 22)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(item.label)
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(item.isPickable ? MagpieTheme.textPrimary : MagpieTheme.textSecondary)
+                    if item.isPickable {
+                        MagpieStatusChip(text: String(localized: "可重新显示"), color: MagpieTheme.accent)
+                    }
+                }
+                if !item.ref.isEmpty {
+                    Text(item.ref)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(MagpieTheme.textMuted)
+                }
+                if !item.why.isEmpty {
+                    Text(item.why)
+                        .font(.caption2)
+                        .foregroundStyle(MagpieTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+    }
+
     private func select(_ value: String) {
         guard let client = app.client else { return }
         Task {
             if await viewModel.pick(client: client, app: app, agentID: agentID, fieldKey: fieldKey, value: value) {
+                dismiss()
+            }
+        }
+    }
+
+    private func selectUnserved(_ item: UnservedGroupDTO) {
+        guard let client = app.client else { return }
+        Task {
+            if await viewModel.showAndPick(
+                client: client,
+                app: app,
+                agentID: agentID,
+                fieldKey: fieldKey,
+                ref: item.ref,
+                value: item.value
+            ) {
                 dismiss()
             }
         }

@@ -5,6 +5,11 @@ import Observation
 @MainActor
 final class SessionsViewModel {
     var sessions: [SessionDTO] = []
+    var saidHits: [SessionSaidHitDTO] = []
+    var saidIndexed: Int?
+    var saidTotal: Int?
+    var saidCut = false
+    var isSearchingSaid = false
     var isLoading = false
     var errorMessage: String?
 
@@ -18,6 +23,41 @@ final class SessionsViewModel {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
         isLoading = false
+    }
+
+    /// 跨全部 Agent 的对话全文检索（upstream `GET /api/sessions/said`）。
+    func searchSaid(client: MagpieAPIClient, query: String, agent: String = "", limit: Int = 50) async {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            saidHits = []
+            saidIndexed = nil
+            saidTotal = nil
+            saidCut = false
+            isSearchingSaid = false
+            return
+        }
+        isSearchingSaid = true
+        defer { isSearchingSaid = false }
+        var items = [
+            URLQueryItem(name: "q", value: trimmed),
+            URLQueryItem(name: "limit", value: "\(limit)")
+        ]
+        if !agent.isEmpty {
+            items.append(URLQueryItem(name: "agent", value: agent))
+        }
+        do {
+            let res: SessionSaidResponseDTO = try await client.send(
+                .get("/api/sessions/said", query: items),
+                as: SessionSaidResponseDTO.self,
+                timeout: 30
+            )
+            saidHits = res.hits
+            saidIndexed = res.indexed
+            saidTotal = res.total
+            saidCut = res.cut == true
+        } catch {
+            // 全文检索失败不影响本地标题筛选
+        }
     }
 
     /// 拉取指定会话的完整对话流与工具调用明细

@@ -36,6 +36,13 @@ struct ProviderDetailView: View {
     @State private var showingTestAllConfirm = false
     @State private var selectedTestModel = ""
     @State private var testAllModels = false
+    @State private var relayCheckModel = ""
+    @State private var isCheckingRelay = false
+    @State private var relayCheckResult: RelayCheckResultDTO?
+    @State private var relayCheckError: String?
+    @State private var isCheckingEgress = false
+    @State private var topUpRateDraft = 0.0
+    @State private var connectAgentsDraft = false
 
     // 编辑草稿
     @State private var nameDraft = ""
@@ -117,6 +124,22 @@ struct ProviderDetailView: View {
                     // 每个区块单独擦除类型：把 12 个高度嵌套的 SwiftUI 泛型
                     // 拼进同一个 TupleView，会让运行时反序列化超长泛型签名并爆栈。
                     AnyView(header(provider))
+                    if let egress = provider.egress {
+                        AnyView(egressBanner(egress))
+                    }
+                    if let proxyGone = provider.proxyGone, !proxyGone.isEmpty {
+                        AnyView(
+                            HStack(spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(MagpieTheme.amber)
+                                Text(String(localized: "原绑定的命名代理「\(proxyGone)」已被删除，当前回退到默认网络。"))
+                                    .font(.caption)
+                                    .foregroundStyle(MagpieTheme.textSecondary)
+                                Spacer(minLength: 0)
+                            }
+                            .magpieCard(padding: 12)
+                        )
+                    }
                     AnyView(quickActions(provider))
                     AnyView(connectionSection)
                     AnyView(keysSection(provider))
@@ -680,6 +703,18 @@ struct ProviderDetailView: View {
                         .foregroundStyle(MagpieTheme.textMuted)
                         .lineLimit(1)
                 }
+
+                if let rest = key.rest {
+                    let restText: String = {
+                        if let why = rest.why, !why.isEmpty { return why }
+                        if rest.notice == true { return String(localized: "上游限额提醒") }
+                        return String(localized: "冷却中")
+                    }()
+                    Text(restText)
+                        .font(.caption2)
+                        .foregroundStyle(rest.notice == true ? MagpieTheme.amber : MagpieTheme.red)
+                        .lineLimit(2)
+                }
             }
 
             Spacer(minLength: 4)
@@ -739,6 +774,22 @@ struct ProviderDetailView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14)
                         .padding(.bottom, 12)
+                }
+
+                let embedCount = provider.embedIds?.count ?? 0
+                let rerankCount = provider.rerankIds?.count ?? 0
+                if embedCount > 0 || rerankCount > 0 {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(MagpieTheme.cyan)
+                        Text(String(localized: "检索模型：\(embedCount) 个嵌入 · \(rerankCount) 个重排"))
+                            .font(.caption2)
+                            .foregroundStyle(MagpieTheme.textMuted)
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
                 }
 
                 if let refreshMessage {
@@ -997,12 +1048,18 @@ struct ProviderDetailView: View {
                         .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(MagpieTheme.textMuted)
                 }
+                if model.disabled != nil {
+                    Image(systemName: "nosign")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(MagpieTheme.red)
+                }
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(selected ? MagpieTheme.accentSoft : MagpieTheme.pill)
             .foregroundStyle(selected ? MagpieTheme.accent : MagpieTheme.textSecondary)
+            .opacity(model.disabled != nil ? 0.55 : 1)
             .clipShape(Capsule())
             .overlay(
                 Capsule().stroke(
@@ -1445,7 +1502,8 @@ struct ProviderDetailView: View {
                                 options: [
                                     ("", String(localized: "自动")),
                                     ("auto", "Auto"),
-                                    ("on", String(localized: "开启"))
+                                    ("on", String(localized: "开启")),
+                                    ("off", String(localized: "关闭"))
                                 ]
                             )
                         }
@@ -1573,10 +1631,15 @@ struct ProviderDetailView: View {
                     tint: MagpieTheme.green,
                     selection: $routingDraft,
                     options: [
-                        ("", String(localized: "默认（智能）")),
+                        ("", String(localized: "额度优先（默认）")),
                         ("order", String(localized: "按顺序")),
+                        ("drain", String(localized: "逐个用完")),
                         ("rotate", String(localized: "轮询")),
-                        ("usage", String(localized: "用量最少"))
+                        ("usage", String(localized: "用量最少")),
+                        ("pace", String(localized: "到期前用完")),
+                        ("weight", String(localized: "按权重")),
+                        ("free", String(localized: "免费优先")),
+                        ("fast", String(localized: "速度优先"))
                     ]
                 )
 
@@ -1764,9 +1827,193 @@ struct ProviderDetailView: View {
                         }
                     }
                 }
+
+                // MARK: - 中转质量检测（POST /api/relay-check）
+                let allModels = (provider.models ?? []).map(\.id)
+                if !allModels.isEmpty {
+                    Divider().background(MagpieTheme.borderSubtle)
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(String(localized: "中转质量检测"))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(MagpieTheme.textPrimary)
+                                Text(String(localized: "对指定模型发起真实问答、工具调用与测速实测"))
+                                    .font(.caption2)
+                                    .foregroundStyle(MagpieTheme.textMuted)
+                            }
+                            Spacer()
+                            Button {
+                                let target = allModels.contains(relayCheckModel) ? relayCheckModel : (allModels.first ?? "")
+                                runRelayCheck(providerID: provider.id, model: target)
+                            } label: {
+                                if isCheckingRelay {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Text(String(localized: "质量检测"))
+                                }
+                            }
+                            .buttonStyle(MagpiePrimaryButtonStyle(tint: MagpieTheme.cyan))
+                            .disabled(isCheckingRelay)
+                        }
+
+                        HStack(spacing: 8) {
+                            Text(String(localized: "检测模型"))
+                                .font(.caption)
+                                .foregroundStyle(MagpieTheme.textMuted)
+                            Spacer()
+                            Picker("", selection: $relayCheckModel) {
+                                ForEach(allModels.prefix(200), id: \.self) { mid in
+                                    Text(mid).tag(mid)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .tint(MagpieTheme.textSecondary)
+                        }
+
+                        if let relayCheckError {
+                            Text(relayCheckError)
+                                .font(.caption)
+                                .foregroundStyle(MagpieTheme.red)
+                                .textSelection(.enabled)
+                        }
+
+                        if let relay = relayCheckResult {
+                            HStack(spacing: 6) {
+                                Image(systemName: relay.passedCount == relay.parts.count ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                                    .foregroundStyle(relay.passedCount == relay.parts.count ? MagpieTheme.green : MagpieTheme.amber)
+                                Text(String(localized: "\(relay.model)：\(relay.passedCount)/\(relay.parts.count) 项通过"))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(MagpieTheme.textPrimary)
+                                Spacer()
+                            }
+
+                            VStack(spacing: 6) {
+                                ForEach(relay.parts) { part in
+                                    relayPartRow(part)
+                                }
+                            }
+                        }
+                    }
+                }
             }
             .padding(14)
         }
+    }
+
+    private func relayPartRow(_ part: RelayPartDTO) -> some View {
+        let passed = part.ok && part.match
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Image(systemName: passed ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(passed ? MagpieTheme.green : MagpieTheme.red)
+                Text(part.kind)
+                    .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(MagpieTheme.textPrimary)
+                if let served = part.served, !served.isEmpty {
+                    Text(served)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(MagpieTheme.textMuted)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if let ttft = part.ttftMs, ttft > 0 {
+                    Text("TTFT \(ttft)ms")
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .foregroundStyle(MagpieTheme.textSecondary)
+                }
+                if let tps = part.tps, tps > 0 {
+                    Text(String(format: "%.1f tok/s", tps))
+                        .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(MagpieTheme.cyan)
+                } else {
+                    Text("\(part.ms)ms")
+                        .font(.system(size: 9.5, design: .monospaced))
+                        .foregroundStyle(MagpieTheme.textMuted)
+                }
+            }
+            if let error = part.error, !error.isEmpty {
+                Text(error)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(MagpieTheme.red)
+                    .textSelection(.enabled)
+            } else if !passed, let want = part.want, let got = part.got {
+                Text(String(localized: "期望 \(want)，实际 \(got)"))
+                    .font(.caption2)
+                    .foregroundStyle(MagpieTheme.amber)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(MagpieTheme.cardSecondary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private func runRelayCheck(providerID: String, model: String) {
+        guard let client = app.client, !model.isEmpty else { return }
+        isCheckingRelay = true
+        relayCheckError = nil
+        relayCheckResult = nil
+        Task {
+            defer { isCheckingRelay = false }
+            if let res = await activeVM.checkRelay(client: client, provider: providerID, model: model) {
+                relayCheckResult = res
+                if res.passedCount == res.parts.count { MagpieHaptics.success() }
+            } else {
+                relayCheckError = activeVM.errorMessage ?? String(localized: "中转检测失败")
+            }
+        }
+    }
+
+    private func egressBanner(_ egress: EgressResultDTO) -> some View {
+        let tint: Color = egress.isUnsupported ? MagpieTheme.red : (egress.isSupported ? MagpieTheme.green : MagpieTheme.amber)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: egress.isUnsupported ? "exclamationmark.shield.fill" : "globe")
+                    .foregroundStyle(tint)
+                Text(
+                    egress.isUnsupported
+                        ? String(localized: "出口地区不受 Anthropic 支持\(egress.loc.map { " (\($0))" } ?? "")")
+                        : (egress.isSupported
+                           ? String(localized: "出口地区受支持\(egress.loc.map { " (\($0))" } ?? "")")
+                           : String(localized: "出口地区未知"))
+                )
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(MagpieTheme.textPrimary)
+                Spacer()
+                Button {
+                    guard let client = app.client else { return }
+                    isCheckingEgress = true
+                    Task {
+                        defer { isCheckingEgress = false }
+                        _ = await activeVM.checkEgress(client: client)
+                    }
+                } label: {
+                    if isCheckingEgress {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Text(String(localized: "重新检测"))
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(MagpieTheme.accent)
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(isCheckingEgress)
+            }
+            if let via = egress.via, !via.isEmpty {
+                Text(String(localized: "通道：\(via)"))
+                    .font(.caption2)
+                    .foregroundStyle(MagpieTheme.textMuted)
+            }
+            if let err = egress.error, !err.isEmpty {
+                Text(err)
+                    .font(.caption2)
+                    .foregroundStyle(MagpieTheme.amber)
+            }
+        }
+        .magpieCard(padding: 12)
     }
 
     private func testResultRow(_ result: ProviderTestResultDTO) -> some View {
@@ -2025,6 +2272,8 @@ struct ProviderDetailView: View {
         bestInFamilyDraft = p.bestInFamily ?? false
         listOffDraft = p.listOff ?? false
         priceRateDraft = p.priceRate ?? 0
+        topUpRateDraft = p.topUpRate ?? 0
+        connectAgentsDraft = p.connectAgents ?? false
         headersDraft = formatHeaders(p.headers)
         extraBodyDraft = p.extraBody?.prettyText ?? ""
         replyHeadersDraft = (p.replyHeaders ?? []).joined(separator: ", ")
@@ -2057,6 +2306,9 @@ struct ProviderDetailView: View {
         if selectedTestModel.isEmpty
             || (selectedTestModel != "__all__" && !all.contains(selectedTestModel)) {
             selectedTestModel = all.first ?? "__all__"
+        }
+        if relayCheckModel.isEmpty || !all.contains(relayCheckModel) {
+            relayCheckModel = all.first ?? ""
         }
     }
 
@@ -2141,6 +2393,8 @@ struct ProviderDetailView: View {
             queueWait: queueWaitDraft,
             maxRPM: maxRPMDraft,
             priceRate: priceRateDraft > 0 ? priceRateDraft : 0,
+            topUpRate: topUpRateDraft > 0 ? topUpRateDraft : nil,
+            connectAgents: provider.connectAgents != nil ? connectAgentsDraft : nil,
             from: nil,
             unlisted: unlistedDraft,
             noModels: noModelsDraft,

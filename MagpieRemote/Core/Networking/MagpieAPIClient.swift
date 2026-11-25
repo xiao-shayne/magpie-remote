@@ -183,10 +183,54 @@ final class MagpieAPIClient: Sendable {
     }
 
     private static func errorMessage(from data: Data) -> String {
-        if let obj = try? JSONDecoder().decode([String: String].self, from: data),
-           let message = obj["error"] {
+        struct ErrorEnvelope: Decodable {
+            let error: String?
+            let detail: String?
+        }
+        if let obj = try? JSONDecoder().decode(ErrorEnvelope.self, from: data),
+           let message = obj.error, !message.isEmpty {
             return message
         }
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    // MARK: - Settings 安全合并写入
+
+    /// 将单个设置项合并到服务端最新的 `/api/settings` 完整 JSON 对象中。
+    ///
+    /// upstream `POST /api/settings` 通过 `settingsapi.Apply` 解析整份 `settings.Settings`，
+    /// 省略的 `settingsapi.Keys` 字段会被重置为零值；因此修改单个字段前必须基于完整配置合并，
+    /// 并移除 `settingsJSON` 中仅用于展示且覆盖原字段类型的只读 `proxies` 字段。
+    static func mergedSettingsBody<V: Encodable>(baseJSON: Data, key: String, value: V) throws -> Data {
+        guard var dict = try JSONSerialization.jsonObject(with: baseJSON) as? [String: Any] else {
+            throw APIError.decoding("无法解析当前服务端设置对象")
+        }
+        dict.removeValue(forKey: "proxies")
+        let encodedValue = try JSONEncoder().encode(value)
+        let jsonValue = try JSONSerialization.jsonObject(with: encodedValue, options: .fragmentsAllowed)
+        dict[key] = jsonValue
+        return try JSONSerialization.data(withJSONObject: dict)
+    }
+
+    /// 基于当前服务端完整设置安全更新单个字段，并返回最新的 `SettingsDTO` 与原始 JSON。
+    func patchSettings<V: Encodable & Sendable>(
+        key: String,
+        value: V,
+        baseJSON: Data? = nil
+    ) async throws -> (settings: SettingsDTO, rawJSON: Data) {
+        let base: Data
+        if let baseJSON {
+            base = baseJSON
+        } else {
+            base = try await sendData(.get("/api/settings"))
+        }
+        let body = try Self.mergedSettingsBody(baseJSON: base, key: key, value: value)
+        let responseData = try await sendData(Endpoint(path: "/api/settings", method: .post, body: body))
+        do {
+            let decoded = try decoder.decode(SettingsDTO.self, from: responseData)
+            return (decoded, responseData)
+        } catch {
+            throw APIError.from(decodingError: error)
+        }
     }
 }

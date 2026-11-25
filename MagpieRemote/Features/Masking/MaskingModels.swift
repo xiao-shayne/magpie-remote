@@ -75,13 +75,15 @@ struct MaskingSeenDTO: Codable, Sendable, Identifiable {
 struct MaskingRecordsResponseDTO: Codable, Sendable {
     var records: [MaskingRecordDTO] = []
     var more: Bool = false
+    var unknown: Bool?
 
-    enum CodingKeys: String, CodingKey { case records, more }
+    enum CodingKeys: String, CodingKey { case records, more, unknown }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.records = (try? c.decode([MaskingRecordDTO].self, forKey: .records)) ?? []
         self.more = (try? c.decode(Bool.self, forKey: .more)) ?? false
+        self.unknown = try? c.decodeIfPresent(Bool.self, forKey: .unknown)
     }
 }
 
@@ -96,6 +98,7 @@ struct MaskingRecordDTO: Codable, Sendable, Identifiable, Hashable {
     var model: String?
     var n: Int
     var values: [MaskingValueDTO]?
+    var hits: [String]?
     var blocked: Bool?
     var took: Int64?
 
@@ -223,6 +226,8 @@ final class MaskingViewModel {
     var kindFilter = ""
     var agentFilter = ""
     var providerFilter = ""
+    var query = ""
+    var hasUnknownSearchValues = false
 
     func load(client: MagpieAPIClient) async {
         isLoading = true
@@ -241,10 +246,28 @@ final class MaskingViewModel {
             summary = s
             records = r.records
             hasMore = r.more
+            hasUnknownSearchValues = r.unknown == true
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
         isLoading = false
+    }
+
+    func reloadRecords(client: MagpieAPIClient) async {
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        do {
+            let r: MaskingRecordsResponseDTO = try await client.send(
+                .get("/api/masking/records", query: recordQuery(before: nil)),
+                as: MaskingRecordsResponseDTO.self
+            )
+            records = r.records
+            hasMore = r.more
+            hasUnknownSearchValues = r.unknown == true
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+        }
     }
 
     func loadMore(client: MagpieAPIClient) async {
@@ -258,6 +281,7 @@ final class MaskingViewModel {
             )
             records.append(contentsOf: r.records)
             hasMore = r.more
+            if r.unknown == true { hasUnknownSearchValues = true }
         } catch {
             errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
         }
@@ -335,6 +359,8 @@ final class MaskingViewModel {
         if !kindFilter.isEmpty { q.append(URLQueryItem(name: "kind", value: kindFilter)) }
         if !agentFilter.isEmpty { q.append(URLQueryItem(name: "agent", value: agentFilter)) }
         if !providerFilter.isEmpty { q.append(URLQueryItem(name: "provider", value: providerFilter)) }
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { q.append(URLQueryItem(name: "q", value: trimmed)) }
         return q
     }
 }

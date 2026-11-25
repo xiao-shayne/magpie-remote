@@ -8,6 +8,7 @@ struct PluginsResponseDTO: Codable, Sendable {
     var mirror: Bool?
     var picker: Bool?
     var registry: PluginRegistryDTO?
+    var leftovers: [PluginLeftoverDTO]?
     var error: String?
 
     init(
@@ -17,6 +18,7 @@ struct PluginsResponseDTO: Codable, Sendable {
         mirror: Bool? = nil,
         picker: Bool? = nil,
         registry: PluginRegistryDTO? = nil,
+        leftovers: [PluginLeftoverDTO]? = nil,
         error: String? = nil
     ) {
         self.plugins = plugins
@@ -25,6 +27,7 @@ struct PluginsResponseDTO: Codable, Sendable {
         self.mirror = mirror
         self.picker = picker
         self.registry = registry
+        self.leftovers = leftovers
         self.error = error
     }
 
@@ -36,12 +39,23 @@ struct PluginsResponseDTO: Codable, Sendable {
         self.mirror = try? container.decodeIfPresent(Bool.self, forKey: .mirror)
         self.picker = try? container.decodeIfPresent(Bool.self, forKey: .picker)
         self.registry = try? container.decodeIfPresent(PluginRegistryDTO.self, forKey: .registry)
+        self.leftovers = try? container.decodeIfPresent([PluginLeftoverDTO].self, forKey: .leftovers)
         self.error = try? container.decodeIfPresent(String.self, forKey: .error)
     }
 
     enum CodingKeys: String, CodingKey {
-        case plugins, bun, bunVersion, mirror, picker, registry, error
+        case plugins, bun, bunVersion, mirror, picker, registry, leftovers, error
     }
+}
+
+/// 残留的未注册依赖包（`plugin.Leftover`）：曾安装失败残留，可通过 `/api/plugins/leftover` 清理。
+struct PluginLeftoverDTO: Codable, Sendable, Identifiable, Hashable {
+    var name: String
+    var spec: String
+    var version: String?
+    var missing: Bool?
+
+    var id: String { spec.isEmpty ? name : spec }
 }
 
 /// npm registry 的来源（`plugin.RegistryInUse`）。
@@ -112,6 +126,7 @@ struct PluginEntryDTO: Codable, Sendable, Identifiable, Hashable {
         case spec, name, ownName, version, latest, icon, error, off, providers, tools
         case isGateway, isMiddleware, isAgent, packageName = "package", serves, moved, commit, head, named
         case gatewayOnly, middlewareOnly, inMagpieOnly
+        case options, optionsExample
     }
 }
 

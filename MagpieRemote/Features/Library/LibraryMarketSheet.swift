@@ -23,6 +23,7 @@ struct LibraryMarketSheet: View {
                 Picker("", selection: $kind) {
                     Text(String(localized: "技能市场")).tag("skills")
                     Text(String(localized: "MCP 市场")).tag("servers")
+                    Text(String(localized: "Claude 插件")).tag("claude")
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
@@ -226,6 +227,8 @@ struct LibraryMarketSheet: View {
         let ok: Bool
         if kind == "skills" {
             ok = await viewModel.installMarketSkill(client: client, item: item, agents: agents)
+        } else if kind == "claude" {
+            ok = await viewModel.installMarketClaudePlugin(client: client, item: item, agents: agents)
         } else {
             ok = await viewModel.installMarketServer(
                 client: client,

@@ -169,6 +169,9 @@ struct SessionsManageSheet: View {
                             Text(source.displayName)
                                 .font(.caption.weight(.medium))
                                 .foregroundStyle(MagpieTheme.textPrimary)
+                            if source.isNew == true {
+                                MagpieStatusChip(text: String(localized: "新检测"), color: MagpieTheme.amber)
+                            }
                             Spacer()
                             Toggle("", isOn: Binding(
                                 get: { source.on ?? false },

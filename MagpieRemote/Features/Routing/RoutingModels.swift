@@ -125,6 +125,9 @@ struct GatewayRouteDTO: Decodable, Sendable, Identifiable, Hashable {
     var parentSession: String?
     var moved: GatewayMoveDTO?
     var served: String?
+    var firstReasoning: Int64?
+    var reasoningHidden: Bool?
+    var tries: [GatewayTryDTO]?
     var usage: [GatewayUsageItemDTO]?
 
     /// 解码时解析一次的时间，供排序、分组与渲染复用，避免反复创建 ISO8601 formatter。
@@ -137,7 +140,7 @@ struct GatewayRouteDTO: Decodable, Sendable, Identifiable, Hashable {
         case session
         case sessionTitle
         case parentSession = "parent_session"
-        case moved, served, usage
+        case moved, served, firstReasoning, reasoningHidden, tries, usage
     }
 
     init(from decoder: Decoder) throws {
@@ -168,7 +171,17 @@ struct GatewayRouteDTO: Decodable, Sendable, Identifiable, Hashable {
         self.parentSession = try? c.decodeIfPresent(String.self, forKey: .parentSession)
         self.moved = try? c.decodeIfPresent(GatewayMoveDTO.self, forKey: .moved)
         self.served = try? c.decodeIfPresent(String.self, forKey: .served)
+        self.firstReasoning = try? c.decodeIfPresent(Int64.self, forKey: .firstReasoning)
+        self.reasoningHidden = try? c.decodeIfPresent(Bool.self, forKey: .reasoningHidden)
+        self.tries = try? c.decodeIfPresent([GatewayTryDTO].self, forKey: .tries)
         self.usage = try? c.decodeIfPresent([GatewayUsageItemDTO].self, forKey: .usage)
+    }
+
+    /// 实际发往上游厂商的模型 ID（当与 `model` 不同时展示，upstream `Try.Wire`）。
+    var effectiveWireModel: String? {
+        guard let wire = tries?.last(where: { !($0.wire ?? "").isEmpty })?.wire,
+              !wire.isEmpty, wire != model else { return nil }
+        return wire
     }
 
     var isError: Bool { !(error ?? "").isEmpty || ((status ?? 0) >= 400) }
@@ -226,6 +239,37 @@ struct GatewayMoveDTO: Codable, Sendable, Hashable {
     var why: String?
 }
 
+/// 单次尝试上游的详细记录（`gateway.Try`）。
+struct GatewayTryDTO: Codable, Sendable, Hashable {
+    var id: String?
+    var provider: String?
+    var model: String?
+    var wire: String?
+    var served: String?
+    var swapped: Bool?
+    var routed: Bool?
+    var upstream: String?
+    var status: Int?
+    var error: String?
+    var millis: Int64?
+    var ttft: Int64?
+    var firstReasoning: Int64?
+    var reasoningHidden: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, provider, model, wire, served, swapped, routed, upstream, status, error
+        case millis = "ms"
+        case ttft, firstReasoning, reasoningHidden
+    }
+}
+
+struct GatewaySeatPriceDTO: Codable, Sendable, Hashable {
+    var input: Double?
+    var output: Double?
+    var cacheRead: Double?
+    var peak: Bool?
+}
+
 /// 决策权衡链路中的每个候选账号/席位
 struct GatewayWeighedDTO: Codable, Sendable, Identifiable, Hashable {
     var id: String
@@ -237,6 +281,7 @@ struct GatewayWeighedDTO: Codable, Sendable, Identifiable, Hashable {
     var model: String?
     var fixed: String?
     var fast: Bool?
+    var ultra: Bool?
     var fallback: Bool?
     /// 网关的休息记录：可能是 true，也可能是一个带 why / status / until 的对象。
     var rest: JSONValue?
@@ -258,11 +303,18 @@ struct GatewayWeighedDTO: Codable, Sendable, Identifiable, Hashable {
     var lapse: String?
     var rank: Int?
     var shared: Bool?
+    var context: Int?
+    var lateTtft: Double?
+    var lateTps: Double?
+    var credits: Bool?
+    var creditsLast: Bool?
+    var price: GatewaySeatPriceDTO?
 
     enum CodingKeys: String, CodingKey {
-        case id, provider, name, icon, who, kind, model, fixed, fast, fallback
+        case id, provider, name, icon, who, kind, model, fixed, fast, ultra, fallback
         case rest, balance, routing, why, used, known, reserve, aside, agent
         case plan, amount, limit, unit, due, renews, soon, lapse, rank, shared
+        case context, lateTtft, lateTps, credits, creditsLast, price
     }
 
     init(from decoder: Decoder) throws {
@@ -276,6 +328,7 @@ struct GatewayWeighedDTO: Codable, Sendable, Identifiable, Hashable {
         self.model = try? c.decodeIfPresent(String.self, forKey: .model)
         self.fixed = try? c.decodeIfPresent(String.self, forKey: .fixed)
         self.fast = try? c.decodeIfPresent(Bool.self, forKey: .fast)
+        self.ultra = try? c.decodeIfPresent(Bool.self, forKey: .ultra)
         self.fallback = try? c.decodeIfPresent(Bool.self, forKey: .fallback)
         self.rest = try? c.decodeIfPresent(JSONValue.self, forKey: .rest)
         self.balance = try? c.decodeIfPresent(String.self, forKey: .balance)
@@ -296,6 +349,12 @@ struct GatewayWeighedDTO: Codable, Sendable, Identifiable, Hashable {
         self.lapse = try? c.decodeIfPresent(String.self, forKey: .lapse)
         self.rank = try? c.decodeIfPresent(Int.self, forKey: .rank)
         self.shared = try? c.decodeIfPresent(Bool.self, forKey: .shared)
+        self.context = try? c.decodeIfPresent(Int.self, forKey: .context)
+        self.lateTtft = try? c.decodeIfPresent(Double.self, forKey: .lateTtft)
+        self.lateTps = try? c.decodeIfPresent(Double.self, forKey: .lateTps)
+        self.credits = try? c.decodeIfPresent(Bool.self, forKey: .credits)
+        self.creditsLast = try? c.decodeIfPresent(Bool.self, forKey: .creditsLast)
+        self.price = try? c.decodeIfPresent(GatewaySeatPriceDTO.self, forKey: .price)
     }
 
     var usedPercent: Int? {

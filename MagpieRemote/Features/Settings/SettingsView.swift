@@ -7,6 +7,8 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var app
     @State private var viewModel = SettingsViewModel()
     @State private var showingDisconnect = false
+    @State private var showingRestartConfirm = false
+    @State private var showingProxies = false
     @State private var showingBackupSheet = false
     @State private var backupPath: String?
     @State private var backupError: String?
@@ -14,6 +16,10 @@ struct SettingsView: View {
     @State private var davsyncStatus: JSONValue?
     @State private var davsyncText = ""
     @State private var davsyncResult: String?
+    @State private var instanceNameDraft = ""
+    @State private var instanceNamePrimed = false
+    @State private var codexSuggestionsDraft = ""
+    @State private var codexSuggestionsPrimed = false
     @State private var otelEndpointDraft = ""
     @State private var otelHeadersDraft = ""
     @State private var otelPrimed = false
@@ -29,6 +35,26 @@ struct SettingsView: View {
             ScrollView {
                 VStack(spacing: 18) {
                     serverHero
+                    if let error = viewModel.errorMessage {
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                            Text(error)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(MagpieTheme.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .magpieCard(padding: 12)
+                    }
+                    if let notice = viewModel.actionNotice {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text(notice)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(MagpieTheme.green)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .magpieCard(padding: 12)
+                    }
                     appearanceSection
                     usageSection
                     networkSection
@@ -74,15 +100,28 @@ struct SettingsView: View {
             } message: {
                 Text(String(localized: "断开后需要重新选择服务器并输入 Web Key。"))
             }
+            .alert(String(localized: "重启 magpie 服务端？"), isPresented: $showingRestartConfirm) {
+                Button(String(localized: "立即重启"), role: .destructive) {
+                    guard let client = app.client else { return }
+                    Task { _ = await viewModel.restartServer(client: client) }
+                }
+                Button(String(localized: "取消"), role: .cancel) {}
+            } message: {
+                Text(String(localized: "服务端将重新启动，正在进行的请求可能短暂中断。"))
+            }
+            .sheet(isPresented: $showingProxies) {
+                ProxiesSheet(viewModel: viewModel)
+            }
             .sheet(isPresented: $showingBackupSheet) {
                 BackupExportSheet(
-                    onExport: { passphrase, keys, signIns in
+                    onExport: { passphrase, keys, signIns, usage in
                         guard let client = app.client else { return nil }
                         let result = await viewModel.exportBackup(
                             client: client,
                             passphrase: passphrase,
                             includeKeys: keys,
-                            includeSignIns: signIns
+                            includeSignIns: signIns,
+                            includeUsage: usage
                         )
                         if let result {
                             backupPath = result.path
@@ -152,7 +191,9 @@ struct SettingsView: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text(app.activeName.isEmpty ? String(localized: "服务器") : app.activeName)
+                        let instanceName = (settings?.name?.isEmpty == false ? settings?.name : nil)
+                            ?? (settings?.nameEnv?.isEmpty == false ? settings?.nameEnv : nil)
+                        Text(instanceName ?? (app.activeName.isEmpty ? String(localized: "服务器") : app.activeName))
                             .font(.headline)
                             .foregroundStyle(MagpieTheme.textPrimary)
                         if app.isConnected {
@@ -210,6 +251,29 @@ struct SettingsView: View {
     // MARK: - 外观
     private var appearanceSection: some View {
         settingsSection(String(localized: "外观与语言"), icon: "paintbrush.fill", tint: MagpieTheme.accent) {
+            otelFieldRow(
+                String(localized: "实例名称"),
+                subtitle: String(localized: "用于在浏览器标签页与多实例中区分这台 magpie"),
+                icon: "tag.fill",
+                tint: MagpieTheme.accent,
+                placeholder: (settings?.nameEnv?.isEmpty == false) ? settings!.nameEnv! : String(localized: "例如 Home Mac / Studio"),
+                text: $instanceNameDraft,
+                isSecret: false
+            ) {
+                update("name", instanceNameDraft.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+            .onAppear {
+                guard !instanceNamePrimed, let current = settings else { return }
+                instanceNamePrimed = true
+                instanceNameDraft = current.name ?? ""
+            }
+            .onChange(of: settings?.name) { _, newValue in
+                if !instanceNamePrimed, settings != nil {
+                    instanceNamePrimed = true
+                    instanceNameDraft = newValue ?? ""
+                }
+            }
+            rowDivider
             themeRow
             rowDivider
             pickerRow(
@@ -218,7 +282,13 @@ struct SettingsView: View {
                 icon: "globe",
                 tint: MagpieTheme.cyan,
                 selection: stringBinding(key: "lang", fallback: "system"),
-                options: [("system", String(localized: "跟随系统")), ("zh", "简体中文"), ("zh-TW", "繁體中文"), ("en", "English")]
+                options: [
+                    ("system", String(localized: "跟随系统")),
+                    ("zh", "简体中文"),
+                    ("zh-TW", "繁體中文"),
+                    ("en", "English"),
+                    ("ja", "日本語")
+                ]
             )
             rowDivider
             intPickerRow(
@@ -333,6 +403,48 @@ struct SettingsView: View {
                     tint: MagpieTheme.amber
                 )
             }
+            if let proxyNow = settings?.proxyNow, !proxyNow.isEmpty {
+                rowDivider
+                infoRow(
+                    String(localized: "当前默认代理"),
+                    value: proxyNow,
+                    icon: "network",
+                    tint: MagpieTheme.cyan
+                )
+            }
+            rowDivider
+            Button {
+                showingProxies = true
+            } label: {
+                HStack(spacing: 12) {
+                    settingsGlyph("network.badge.shield.half.filled", tint: MagpieTheme.purple)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(localized: "命名代理 (HTTP / SOCKS5 / SSH)"))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(MagpieTheme.textPrimary)
+                        Text(String(localized: "管理已保存的代理与 SSH 转发隧道"))
+                            .font(.caption2)
+                            .foregroundStyle(MagpieTheme.textMuted)
+                    }
+                    Spacer(minLength: 8)
+                    let count = settings?.proxies?.count ?? 0
+                    if count > 0 {
+                        Text("\(count)")
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(MagpieTheme.textSecondary)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(MagpieTheme.pill, in: Capsule())
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(MagpieTheme.textMuted.opacity(0.7))
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -393,6 +505,36 @@ struct SettingsView: View {
             )
             rowDivider
             toggleRow(
+                String(localized: "Claude 禁用额外付费额度"),
+                subtitle: String(localized: "订阅额度用尽后直接跳过，不触发 Anthropic Extra Usage 扣费"),
+                icon: "creditcard.trianglebadge.exclamationmark",
+                tint: MagpieTheme.amber,
+                isOn: boolBinding(key: "claudeNoExtraUsage", fallback: false)
+            )
+            rowDivider
+            toggleRow(
+                String(localized: "不支持地区暂停 Claude 请求"),
+                subtitle: String(localized: "当检测到网络出口不在 Anthropic 支持地区时暂缓发往 Claude 订阅的请求"),
+                icon: "globe.badge.chevron.backward",
+                tint: MagpieTheme.red,
+                isOn: boolBinding(key: "claudeRegionHold", fallback: false)
+            )
+            rowDivider
+            pickerRow(
+                String(localized: "生图默认分辨率"),
+                subtitle: String(localized: "Image MCP 未指定尺寸时的默认清晰度"),
+                icon: "photo.fill",
+                tint: MagpieTheme.purple,
+                selection: stringBinding(key: "imageResolution", fallback: ""),
+                options: [
+                    ("", String(localized: "模型默认")),
+                    ("1K", "1K"),
+                    ("2K", "2K"),
+                    ("4K", "4K")
+                ]
+            )
+            rowDivider
+            toggleRow(
                 String(localized: "完整上下文窗口"),
                 subtitle: String(localized: "告知 Agent 模型的完整窗口，而不是可用工作窗口"),
                 icon: "rectangle.expand.vertical",
@@ -407,6 +549,66 @@ struct SettingsView: View {
                 tint: MagpieTheme.purple,
                 isOn: boolBinding(key: "codexAgentsV1", fallback: false)
             )
+            rowDivider
+            otelFieldRow(
+                String(localized: "Codex 提示词建议模型"),
+                subtitle: String(localized: "后台 ambient_suggestions 使用的模型 ID，留空沿用 Codex 默认"),
+                icon: "sparkles",
+                tint: MagpieTheme.cyan,
+                placeholder: "provider/model",
+                text: $codexSuggestionsDraft,
+                isSecret: false
+            ) {
+                guard let client = app.client else { return }
+                Task {
+                    await viewModel.setCodexSuggestions(
+                        client: client,
+                        model: codexSuggestionsDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    )
+                }
+            }
+            .onAppear {
+                guard !codexSuggestionsPrimed, let current = settings else { return }
+                codexSuggestionsPrimed = true
+                codexSuggestionsDraft = current.codexSuggestions ?? ""
+            }
+            .onChange(of: settings?.codexSuggestions) { _, newValue in
+                if !codexSuggestionsPrimed, settings != nil {
+                    codexSuggestionsPrimed = true
+                    codexSuggestionsDraft = newValue ?? ""
+                }
+            }
+            rowDivider
+            toggleRow(
+                String(localized: "网关暴露裸模型 ID"),
+                subtitle: String(localized: "允许客户端用不含 provider/ 前缀的模型名请求网关"),
+                icon: "textformat.abc",
+                tint: MagpieTheme.accent,
+                isOn: Binding(
+                    get: { settings?.bareModelIDs ?? false },
+                    set: { on in
+                        guard let client = app.client else { return }
+                        let only = on ? (settings?.bareModelIDsOnly ?? false) : false
+                        Task { await viewModel.setBareModelIDs(client: client, on: on, only: only) }
+                    }
+                )
+            )
+            if settings?.bareModelIDs == true {
+                rowDivider
+                toggleRow(
+                    String(localized: "仅暴露裸模型 ID"),
+                    subtitle: String(localized: "隐藏带 provider/ 前缀的模型名，只保留裸名称"),
+                    icon: "textformat.abc.dottedunderline",
+                    tint: MagpieTheme.accent,
+                    isOn: Binding(
+                        get: { settings?.bareModelIDsOnly ?? false },
+                        set: { only in
+                            guard let client = app.client else { return }
+                            Task { await viewModel.setBareModelIDs(client: client, on: true, only: only) }
+                        }
+                    )
+                )
+            }
         }
     }
 
@@ -444,6 +646,23 @@ struct SettingsView: View {
                 tint: MagpieTheme.purple,
                 isOn: boolBinding(key: "redactModel", fallback: false)
             )
+            rowDivider
+            toggleRow(
+                String(localized: "自定义词忽略大小写"),
+                subtitle: String(localized: "脱敏词表不区分大小写进行匹配"),
+                icon: "textformat",
+                tint: MagpieTheme.cyan,
+                isOn: boolBinding(key: "redactWordsAnyCase", fallback: false)
+            )
+            if let modelDir = settings?.redactModelDir, !modelDir.isEmpty {
+                rowDivider
+                copyRow(
+                    String(localized: "本地模型目录"),
+                    value: modelDir,
+                    icon: "folder.fill",
+                    tint: MagpieTheme.amber
+                )
+            }
         }
     }
 
@@ -686,7 +905,7 @@ struct SettingsView: View {
 
     // MARK: - 关于
     private var aboutSection: some View {
-        settingsSection(String(localized: "关于"), icon: "info.circle.fill", tint: MagpieTheme.textSecondary) {
+        settingsSection(String(localized: "关于与服务端维护"), icon: "info.circle.fill", tint: MagpieTheme.textSecondary) {
             infoRow(
                 String(localized: "客户端"),
                 value: "Magpie Remote \(appVersion)",
@@ -696,10 +915,25 @@ struct SettingsView: View {
             rowDivider
             infoRow(
                 String(localized: "服务端"),
-                value: settings?.version ?? "—",
+                value: settings?.version ?? viewModel.updateStatus?.current ?? "—",
                 icon: "server.rack",
                 tint: MagpieTheme.cyan
             )
+            rowDivider
+            pickerRow(
+                String(localized: "更新频道"),
+                subtitle: String(localized: "控制服务端接收的版本推送节奏"),
+                icon: "arrow.triangle.2.circlepath.circle.fill",
+                tint: MagpieTheme.accent,
+                selection: stringBinding(key: "updateChannel", fallback: ""),
+                options: [
+                    ("", String(localized: "全部版本")),
+                    ("daily", "Daily"),
+                    ("stable", "Stable")
+                ]
+            )
+            rowDivider
+            serverUpdateRow
             rowDivider
             copyRow(
                 String(localized: "数据目录"),
@@ -707,6 +941,31 @@ struct SettingsView: View {
                 icon: "folder.fill",
                 tint: MagpieTheme.amber
             )
+            rowDivider
+            Button {
+                showingRestartConfirm = true
+            } label: {
+                HStack(spacing: 12) {
+                    settingsGlyph("arrow.clockwise.circle.fill", tint: MagpieTheme.amber)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(String(localized: "重启 magpie 服务端"))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(MagpieTheme.textPrimary)
+                        Text(String(localized: "重新拉起远端网关与 Web 服务"))
+                            .font(.caption2)
+                            .foregroundStyle(MagpieTheme.textMuted)
+                    }
+                    Spacer()
+                    if viewModel.isRestarting {
+                        ProgressView().controlSize(.small)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(viewModel.isRestarting)
             rowDivider
             Button {
                 showingDisconnect = true
@@ -724,6 +983,72 @@ struct SettingsView: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    @ViewBuilder
+    private var serverUpdateRow: some View {
+        let status = viewModel.updateStatus
+        HStack(spacing: 12) {
+            settingsGlyph("arrow.down.circle.fill", tint: status?.hasUpdate == true ? MagpieTheme.green : MagpieTheme.textSecondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(String(localized: "服务端更新"))
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(MagpieTheme.textPrimary)
+                if let status {
+                    if status.state == "ready", let latest = status.latest {
+                        Text(String(localized: "新版本 \(latest) 已就绪，重启即可生效"))
+                            .font(.caption2)
+                            .foregroundStyle(MagpieTheme.green)
+                    } else if (status.state == "available" || status.state == "found"), let latest = status.latest {
+                        Text(String(localized: "发现新版本 \(latest)"))
+                            .font(.caption2)
+                            .foregroundStyle(MagpieTheme.accent)
+                    } else if status.state == "downloading" {
+                        Text(String(localized: "正在下载更新…"))
+                            .font(.caption2)
+                            .foregroundStyle(MagpieTheme.accent)
+                    } else if let err = status.error, !err.isEmpty {
+                        Text(err)
+                            .font(.caption2)
+                            .foregroundStyle(MagpieTheme.red)
+                            .lineLimit(2)
+                    } else {
+                        Text(String(localized: "已是最新"))
+                            .font(.caption2)
+                            .foregroundStyle(MagpieTheme.textMuted)
+                    }
+                } else {
+                    Text(String(localized: "检查是否有可用的 magpie 新版本"))
+                        .font(.caption2)
+                        .foregroundStyle(MagpieTheme.textMuted)
+                }
+            }
+            Spacer(minLength: 8)
+            if viewModel.isCheckingUpdate {
+                ProgressView().controlSize(.small)
+            } else if status?.state == "ready" || status?.state == "available" || status?.state == "found" {
+                Button(status?.state == "ready" ? String(localized: "重启更新") : String(localized: "安装更新")) {
+                    guard let client = app.client else { return }
+                    Task { await viewModel.installUpdate(client: client) }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(MagpieTheme.green, in: Capsule())
+                .buttonStyle(.plain)
+            } else {
+                Button(String(localized: "检查更新")) {
+                    guard let client = app.client else { return }
+                    Task { await viewModel.checkUpdate(client: client) }
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(MagpieTheme.accent)
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
 
     // MARK: - 分组容器
@@ -1033,6 +1358,8 @@ private extension SettingsDTO {
         case "currency": return currency
         case "tray": return tray
         case "sessionTerminal": return sessionTerminal
+        case "imageResolution": return imageResolution
+        case "updateChannel": return updateChannel
         default: return nil
         }
     }
@@ -1054,12 +1381,16 @@ private extension SettingsDTO {
         case "redactPersonal": return redactPersonal
         case "redactModel": return redactModel
         case "redactShape": return redactShape
+        case "redactWordsAnyCase": return redactWordsAnyCase
         case "quotaLeft": return quotaLeft
         case "chineseUnits": return chineseUnits
         case "claudeCache": return claudeCacheEnabled
         case "claudeAttribution": return claudeAttributionOff.map { !$0 }
+        case "claudeNoExtraUsage": return claudeNoExtraUsage
+        case "claudeRegionHold": return claudeRegionHold
         case "fullContext": return fullContext
         case "codexAgentsV1": return codexAgentsV1
+        case "bareModelIDs": return bareModelIDs
         case "\u{6B}\u{65}\u{65}\u{70}\u{41}\u{77}\u{61}\u{6B}\u{65}": return awake
         default: return nil
         }
@@ -1198,12 +1529,13 @@ private struct DavsyncSheet: View {
 
 // MARK: - 备份导出面板
 private struct BackupExportSheet: View {
-    let onExport: (String, Bool, Bool) async -> BackupExportResultDTO?
+    let onExport: (String, Bool, Bool, Bool) async -> BackupExportResultDTO?
 
     @Environment(\.dismiss) private var dismiss
     @State private var passphrase = ""
     @State private var includeKeys = true
     @State private var includeSignIns = false
+    @State private var includeUsage = true
     @State private var working = false
     @State private var errorMessage: String?
 
@@ -1221,6 +1553,7 @@ private struct BackupExportSheet: View {
                 Section {
                     Toggle(String(localized: "包含 Provider 的 Key"), isOn: $includeKeys)
                     Toggle(String(localized: "包含订阅登录（sign-ins）"), isOn: $includeSignIns)
+                    Toggle(String(localized: "包含用量历史"), isOn: $includeUsage)
                 } footer: {
                     Text(String(localized: "备份写入 magpie 所在机器的 Downloads 文件夹；完成后会显示路径。"))
                 }
@@ -1262,7 +1595,7 @@ private struct BackupExportSheet: View {
         working = true
         errorMessage = nil
         Task {
-            let result = await onExport(passphrase, includeKeys, includeSignIns)
+            let result = await onExport(passphrase, includeKeys, includeSignIns, includeUsage)
             working = false
             if result != nil {
                 dismiss()

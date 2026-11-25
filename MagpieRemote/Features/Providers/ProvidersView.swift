@@ -47,6 +47,61 @@ struct ProvidersView: View {
                         .magpieCard()
                     }
 
+                    // Claude 出口地区告警（upstream egress）
+                    if let badEgress = viewModel.providers.first(where: { $0.egress?.isUnsupported == true }),
+                       let egress = badEgress.egress {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack(spacing: 8) {
+                                Image(systemName: "globe.badge.chevron.backward")
+                                    .foregroundStyle(MagpieTheme.amber)
+                                Text(String(localized: "Claude 出口地区受限\(egress.loc.map { " (\($0))" } ?? "")"))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(MagpieTheme.textPrimary)
+                                Spacer()
+                                Button(String(localized: "重新检测")) {
+                                    guard let client = app.client else { return }
+                                    Task { _ = await viewModel.checkEgress(client: client) }
+                                }
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(MagpieTheme.accent)
+                                .buttonStyle(.plain)
+                                .disabled(viewModel.isOperating)
+                            }
+                            Text(String(localized: "当前网络出口不在 Anthropic 支持的地区，可在该 Provider 或设置中更换代理，或在设置中开启「不支持地区暂停 Claude 请求」。"))
+                                .font(.caption2)
+                                .foregroundStyle(MagpieTheme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .magpieCard(padding: 12)
+                    }
+
+                    // 已下架旧插件迁移提醒（upstream withdrawn）
+                    if !viewModel.withdrawn.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 6) {
+                                Image(systemName: "exclamationmark.circle.fill")
+                                    .foregroundStyle(MagpieTheme.amber)
+                                Text(String(localized: "存在已下架的旧插件"))
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(MagpieTheme.textPrimary)
+                            }
+                            ForEach(viewModel.withdrawn) { item in
+                                let label = item.name ?? item.id
+                                let replacement = item.instead ?? item.insteadId
+                                Text(
+                                    replacement != nil
+                                        ? String(localized: "\(label) 已下架，建议改用 \(replacement!)。")
+                                        : String(localized: "\(label) 已下架，请在 Plugins 页停用或移除。")
+                                )
+                                .font(.caption2)
+                                .foregroundStyle(MagpieTheme.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .magpieCard(padding: 12)
+                    }
+
                     // 活跃 Providers 卡片列表
                     if !activeProviders.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {

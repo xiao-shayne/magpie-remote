@@ -70,6 +70,14 @@ struct GatewayView: View {
                                     rotate(key: key)
                                 }, onLimit: {
                                     limitTarget = GatewayLimitTarget(keyID: key.id, initialSlot: key.bindingLimitIndex)
+                                }, onRouting: { routing in
+                                    if let client = app.client {
+                                        Task { _ = await viewModel.setRouting(client: client, keyID: key.id, routing: routing) }
+                                    }
+                                }, onMemory: { allow in
+                                    if let client = app.client {
+                                        Task { _ = await viewModel.setMemory(client: client, keyID: key.id, memory: allow) }
+                                    }
                                 }, onDelete: {
                                     if let client = app.client {
                                         Task { _ = await viewModel.delete(client: client, id: key.id) }
@@ -474,7 +482,9 @@ struct GatewayView: View {
                                     .lineLimit(1)
                             }
                             Spacer()
-                            if model.group == true {
+                            if model.decides == true {
+                                MagpieStatusChip(text: String(localized: "决策组"), color: MagpieTheme.cyan)
+                            } else if model.group == true {
                                 MagpieStatusChip(text: String(localized: "路由组"), color: MagpieTheme.purple)
                             }
                             if let provider = model.providerName ?? model.provider {
@@ -825,6 +835,7 @@ private struct GatewayLimitEditorSheet: View {
     @State private var period = "day"
     @State private var days = ""
     @State private var hours = ""
+    @State private var selectedAccountWindow = ""
     @State private var tokens = ""
     @State private var cost = ""
     @State private var cacheReads = false
@@ -849,6 +860,12 @@ private struct GatewayLimitEditorSheet: View {
         return usages[selectedSlot]
     }
 
+    private var parsedAccountWindow: (account: String, window: String)? {
+        let parts = selectedAccountWindow.split(separator: "|", maxSplits: 1).map(String.init)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        return (parts[0], parts[1])
+    }
+
     private var canSave: Bool {
         guard let tokenValue = Self.parseTokenCount(tokens),
               let costValue = Self.parseCost(cost),
@@ -859,6 +876,9 @@ private struct GatewayLimitEditorSheet: View {
         }
         if period == "hours" {
             guard let value = Int(hours.trimmingCharacters(in: .whitespaces)), (1...8760).contains(value) else { return false }
+        }
+        if period == "account" {
+            guard parsedAccountWindow != nil else { return false }
         }
         return true
     }
@@ -889,6 +909,9 @@ private struct GatewayLimitEditorSheet: View {
                         Text(String(localized: "每月")).tag("month")
                         Text(String(localized: "每 N 天")).tag("days")
                         Text(String(localized: "每 N 小时")).tag("hours")
+                        if !viewModel.accountWindows.isEmpty || period == "account" {
+                            Text(String(localized: "跟随账号窗口")).tag("account")
+                        }
                         Text(String(localized: "累计（不自动重置）")).tag("total")
                     }
                     if period == "days" {
@@ -899,10 +922,23 @@ private struct GatewayLimitEditorSheet: View {
                         TextField(String(localized: "小时数 (1–8760)"), text: $hours)
                             .keyboardType(.numberPad)
                     }
+                    if period == "account" {
+                        if viewModel.accountWindows.isEmpty {
+                            Text(String(localized: "当前没有可用的订阅账号配额窗口"))
+                                .font(.caption)
+                                .foregroundStyle(MagpieTheme.textMuted)
+                        } else {
+                            Picker(String(localized: "账号窗口"), selection: $selectedAccountWindow) {
+                                ForEach(viewModel.accountWindows) { win in
+                                    Text(win.displayLabel).tag(win.id)
+                                }
+                            }
+                        }
+                    }
                 } header: {
                     Text(String(localized: "周期"))
                 } footer: {
-                    Text(String(localized: "日/周/月按本机时区的自然窗口计算；每 N 天/小时从设置或重置时开始循环。"))
+                    Text(String(localized: "日/周/月按本机时区的自然窗口计算；每 N 天/小时从设置或重置时开始循环；跟随账号窗口会在对应订阅窗口重置时清零。"))
                 }
 
                 Section {
@@ -1063,6 +1099,11 @@ private struct GatewayLimitEditorSheet: View {
             period = limit.period
             days = limit.days.map { String($0) } ?? ""
             hours = limit.hours.map { String($0) } ?? ""
+            if let acc = limit.account, let win = limit.accountWindow, !acc.isEmpty, !win.isEmpty {
+                selectedAccountWindow = "\(acc)|\(win)"
+            } else {
+                selectedAccountWindow = viewModel.accountWindows.first?.id ?? ""
+            }
             tokens = limit.tokens.map { String($0) } ?? ""
             cost = limit.cost.map { String(format: "%g", $0) } ?? ""
             cacheReads = limit.cacheReads ?? false
@@ -1073,6 +1114,7 @@ private struct GatewayLimitEditorSheet: View {
             period = fresh
             days = fresh == "days" ? "10" : ""
             hours = fresh == "hours" ? "5" : ""
+            selectedAccountWindow = viewModel.accountWindows.first?.id ?? ""
             tokens = ""
             cost = ""
             cacheReads = false
@@ -1098,6 +1140,8 @@ private struct GatewayLimitEditorSheet: View {
 
         var dayCount: Int?
         var hourCount: Int?
+        var accountName: String?
+        var accountWindowName: String?
         if period == "days" {
             guard let value = Int(days.trimmingCharacters(in: .whitespaces)), (1...3650).contains(value) else {
                 localError = String(localized: "周期天数需为 1–3650")
@@ -1112,11 +1156,21 @@ private struct GatewayLimitEditorSheet: View {
             }
             hourCount = value
         }
+        if period == "account" {
+            guard let parsed = parsedAccountWindow else {
+                localError = String(localized: "请选择一个账号配额窗口")
+                return
+            }
+            accountName = parsed.account
+            accountWindowName = parsed.window
+        }
 
         let payload = GatewayLimitPayload(
             period: period,
             days: dayCount,
             hours: hourCount,
+            account: accountName,
+            accountWindow: accountWindowName,
             tokens: tokenValue > 0 ? tokenValue : nil,
             cost: costValue > 0 ? costValue : nil,
             cacheReads: cacheReads ? true : nil,
@@ -1317,6 +1371,8 @@ private struct GatewayKeyCard: View {
     let onCopy: () -> Void
     let onRotate: () -> Void
     let onLimit: () -> Void
+    let onRouting: (String) -> Void
+    let onMemory: (Bool) -> Void
     let onDelete: () -> Void
 
     var body: some View {
@@ -1341,8 +1397,8 @@ private struct GatewayKeyCard: View {
                             .font(.system(size: 9, weight: .bold))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
-                            .background(Color(hex: "8b5cf6").opacity(0.15))
-                            .foregroundStyle(Color(hex: "8b5cf6"))
+                            .background(MagpieTheme.purple.opacity(0.15))
+                            .foregroundStyle(MagpieTheme.purple)
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
                     if key.isReadOnly {
@@ -1363,6 +1419,21 @@ private struct GatewayKeyCard: View {
                             .foregroundStyle(MagpieTheme.accent)
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
+                    if key.memory == true {
+                        Text("MEMORY")
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(MagpieTheme.cyan.opacity(0.15))
+                            .foregroundStyle(MagpieTheme.cyan)
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+                }
+
+                if let routing = key.routing, !routing.isEmpty {
+                    Text(String(localized: "路由覆盖：\(GroupRouting.displayName(routing))"))
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(MagpieTheme.accent)
                 }
 
                 if let masked = key.masked {
@@ -1431,6 +1502,34 @@ private struct GatewayKeyCard: View {
             }
             Button(action: onLimit) {
                 Label(String(localized: "限额…"), systemImage: "gauge.with.dots.needle.33percent")
+            }
+            if !key.isReadOnly && key.browser != true {
+                Menu {
+                    ForEach(GroupRouting.keyOverrides) { option in
+                        Button {
+                            onRouting(option.id)
+                        } label: {
+                            if (key.routing ?? "") == option.id {
+                                Label(option.label, systemImage: "checkmark")
+                            } else {
+                                Text(option.label)
+                            }
+                        }
+                    }
+                } label: {
+                    Label(String(localized: "路由策略覆盖"), systemImage: "arrow.triangle.branch")
+                }
+
+                if key.lan != true && key.expires == nil {
+                    Button {
+                        onMemory(!(key.memory == true))
+                    } label: {
+                        Label(
+                            key.memory == true ? String(localized: "关闭 Memory 访问") : String(localized: "允许 Memory 访问"),
+                            systemImage: key.memory == true ? "brain.head.profile.fill" : "brain.head.profile"
+                        )
+                    }
+                }
             }
             Button(action: onRotate) {
                 Label(String(localized: "轮换 Key"), systemImage: "arrow.triangle.2.circlepath")

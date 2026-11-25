@@ -27,6 +27,23 @@ struct GroupDetailView: View {
             VStack(spacing: 16) {
                 if let group {
                     headerCard(group)
+                    if let cf = group.classifierFailed, !cf.error.isEmpty {
+                        HStack(alignment: .top, spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(MagpieTheme.amber)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(String(localized: "上次意图分类失败"))
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(MagpieTheme.textPrimary)
+                                Text(cf.error)
+                                    .font(.caption2)
+                                    .foregroundStyle(MagpieTheme.textSecondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .magpieCard(padding: 12)
+                    }
                     strategyCard(group)
                     if group.routing == "manual" {
                         pickCard(group)
@@ -319,6 +336,11 @@ struct GroupDetailView: View {
                     }
                     if member.free == true {
                         MagpieStatusChip(text: "FREE", color: MagpieTheme.green)
+                    }
+                    if member.ultra == true {
+                        MagpieStatusChip(text: "ULTRA", color: MagpieTheme.purple)
+                    } else if member.fast == true {
+                        MagpieStatusChip(text: "FAST", color: MagpieTheme.cyan)
                     }
                     if isPicked {
                         MagpieStatusChip(text: String(localized: "已指定"), color: MagpieTheme.accent, icon: "checkmark")

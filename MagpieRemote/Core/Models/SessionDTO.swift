@@ -80,3 +80,55 @@ struct TranscriptPartDTO: Codable, Sendable, Identifiable {
         case role, kind, name, text, cut
     }
 }
+
+/// `GET /api/sessions/said`：跨全部 Agent 的对话全文检索结果。
+struct SessionSaidResponseDTO: Codable, Sendable {
+    var hits: [SessionSaidHitDTO]
+    var indexed: Int?
+    var total: Int?
+    var cut: Bool?
+    var listing: Bool?
+
+    enum CodingKeys: String, CodingKey { case hits, indexed, total, cut, listing }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.hits = (try? c.decode([SessionSaidHitDTO].self, forKey: .hits)) ?? []
+        self.indexed = try? c.decodeIfPresent(Int.self, forKey: .indexed)
+        self.total = try? c.decodeIfPresent(Int.self, forKey: .total)
+        self.cut = try? c.decodeIfPresent(Bool.self, forKey: .cut)
+        self.listing = try? c.decodeIfPresent(Bool.self, forKey: .listing)
+    }
+}
+
+struct SessionSaidHitDTO: Codable, Sendable, Identifiable, Hashable {
+    var agent: String
+    var sessionID: String
+    var title: String?
+    var cwd: String?
+    var last: String?
+    var wsl: String?
+    var transcript: Bool?
+    var hit: SessionHitDTO
+
+    var id: String { "\(agent):\(sessionID)" }
+    var displayTitle: String { (title?.isEmpty == false) ? title! : sessionID }
+
+    enum CodingKeys: String, CodingKey {
+        case agent
+        case sessionID = "id"
+        case title, cwd, last, wsl, transcript, hit
+    }
+
+    func asSessionDTO() -> SessionDTO {
+        SessionDTO(id: sessionID, agent: agent, name: nil, title: title, cost: nil, input: nil, output: nil, last: last, carry: nil)
+    }
+}
+
+struct SessionHitDTO: Codable, Sendable, Hashable {
+    var role: String?
+    var kind: String?
+    var before: String?
+    var match: String?
+    var after: String?
+}

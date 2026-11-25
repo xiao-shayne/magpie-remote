@@ -63,9 +63,19 @@ struct SessionsView: View {
                     statsCard
                     agentFilter
 
-                    if filteredSessions.isEmpty {
+                    if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        saidSearchSection
+                    }
+
+                    if filteredSessions.isEmpty && viewModel.saidHits.isEmpty && !viewModel.isSearchingSaid {
                         emptyState
-                    } else {
+                    } else if !filteredSessions.isEmpty {
+                        if !viewModel.saidHits.isEmpty {
+                            MagpieSectionLabel(
+                                title: String(localized: "匹配标题的会话"),
+                                detail: "\(filteredSessions.count)"
+                            )
+                        }
                         MagpieGlassGroup(spacing: 10) {
                             LazyVStack(spacing: 10) {
                                 ForEach(filteredSessions) { session in
@@ -84,7 +94,19 @@ struct SessionsView: View {
                 .padding(.bottom, 96)
             }
             .magpiePageBackground()
-            .searchable(text: $searchText, prompt: String(localized: "搜索会话标题、ID 或 Agent…"))
+            .searchable(text: $searchText, prompt: String(localized: "搜索会话标题、对话内容或 Agent…"))
+            .task(id: "\(searchText)|\(selectedAgent)") {
+                let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if q.isEmpty {
+                    viewModel.saidHits = []
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(300))
+                if Task.isCancelled { return }
+                if let client = app.client {
+                    await viewModel.searchSaid(client: client, query: q, agent: selectedAgent)
+                }
+            }
             .navigationTitle(String(localized: "Sessions"))
             .toolbarBackground(.ultraThinMaterial, for: .navigationBar)
             .navigationDestination(for: SessionDTO.self) { session in
@@ -197,6 +219,54 @@ struct SessionsView: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var saidSearchSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                MagpieSectionLabel(
+                    title: String(localized: "对话内容匹配"),
+                    detail: viewModel.saidHits.isEmpty ? nil : "\(viewModel.saidHits.count)\(viewModel.saidCut ? "+" : "")"
+                )
+                Spacer()
+                if viewModel.isSearchingSaid {
+                    ProgressView().controlSize(.small)
+                }
+            }
+
+            if !viewModel.saidHits.isEmpty {
+                LazyVStack(spacing: 8) {
+                    ForEach(viewModel.saidHits) { item in
+                        NavigationLink(value: item.asSessionDTO()) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 7) {
+                                    MagpieIconView(icon: item.agent, name: item.agent, size: 18, cornerRadius: 5)
+                                    Text(item.displayTitle)
+                                        .font(.system(size: 13.5, weight: .semibold))
+                                        .foregroundStyle(MagpieTheme.textPrimary)
+                                        .lineLimit(1)
+                                    Spacer(minLength: 4)
+                                    if let role = item.hit.role, !role.isEmpty {
+                                        MagpieStatusChip(text: role, color: MagpieTheme.cyan)
+                                    }
+                                }
+
+                                let before = item.hit.before ?? ""
+                                let match = item.hit.match ?? ""
+                                let after = item.hit.after ?? ""
+                                Text("\(Text(before).foregroundStyle(MagpieTheme.textMuted))\(Text(match).foregroundStyle(MagpieTheme.accent).bold())\(Text(after).foregroundStyle(MagpieTheme.textMuted))")
+                                    .font(.caption)
+                                    .lineLimit(3)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .magpieLiquidCard(padding: 11, cornerRadius: 16)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
     }
 
     private var emptyState: some View {

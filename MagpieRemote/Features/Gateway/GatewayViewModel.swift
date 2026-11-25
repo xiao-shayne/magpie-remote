@@ -7,6 +7,8 @@ struct GatewayLimitPayload: Encodable, Sendable {
     var period: String
     var days: Int?
     var hours: Int?
+    var account: String?
+    var accountWindow: String?
     var tokens: Int64?
     var cost: Double?
     var cacheReads: Bool?
@@ -20,6 +22,7 @@ final class GatewayViewModel {
     var gateway: GatewayStateDTO?
     var models: [GatewayModelDTO] = []
     var accounts: [GatewayModelDTO] = []
+    var accountWindows: [GatewayAccountWindowDTO] = []
     var accountGroups: [GatewayAccountGroupDTO] = []
     var callDetail: GatewayCallDetailDTO?
     var isLoading = false
@@ -63,6 +66,18 @@ final class GatewayViewModel {
             accounts = res.accounts ?? []
         } catch {
             // 模型列表失败不阻断其他区域
+        }
+    }
+
+    func loadAccountWindows(client: MagpieAPIClient) async {
+        do {
+            let res: GatewayAccountWindowsResponseDTO = try await client.send(
+                .get("/api/caller-keys/account-windows"),
+                as: GatewayAccountWindowsResponseDTO.self
+            )
+            accountWindows = res.windows
+        } catch {
+            // 账号窗口列表失败不阻断
         }
     }
 
@@ -141,6 +156,7 @@ final class GatewayViewModel {
         await load(client: client)
         await loadGateway(client: client)
         await loadModels(client: client)
+        await loadAccountWindows(client: client)
     }
 
     func loadCall(client: MagpieAPIClient, id: Int64) async -> GatewayCallDetailDTO? {
@@ -286,6 +302,44 @@ final class GatewayViewModel {
             }
             let res: GatewayKeysResponseDTO = try await client.send(
                 .post("/api/caller-keys/reset-limit-key", body: Body(key: keyID, index: index)),
+                as: GatewayKeysResponseDTO.self
+            )
+            self.keys = res.keys
+            MagpieHaptics.success()
+            return true
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            return false
+        }
+    }
+
+    func setRouting(client: MagpieAPIClient, keyID: String, routing: String) async -> Bool {
+        isOperating = true
+        errorMessage = nil
+        defer { isOperating = false }
+        do {
+            struct Body: Encodable { var key: String; var routing: String }
+            let res: GatewayKeysResponseDTO = try await client.send(
+                .post("/api/caller-keys/routing-key", body: Body(key: keyID, routing: routing)),
+                as: GatewayKeysResponseDTO.self
+            )
+            self.keys = res.keys
+            MagpieHaptics.success()
+            return true
+        } catch {
+            errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
+            return false
+        }
+    }
+
+    func setMemory(client: MagpieAPIClient, keyID: String, memory: Bool) async -> Bool {
+        isOperating = true
+        errorMessage = nil
+        defer { isOperating = false }
+        do {
+            struct Body: Encodable { var key: String; var memory: Bool }
+            let res: GatewayKeysResponseDTO = try await client.send(
+                .post("/api/caller-keys/memory-key", body: Body(key: keyID, memory: memory)),
                 as: GatewayKeysResponseDTO.self
             )
             self.keys = res.keys
